@@ -1,4 +1,4 @@
-# acido 0.10.11
+# acido 0.10.13
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -40,7 +40,7 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
 In this example we are going to use acido to:
 * Create 3 containers
 * Install nmap on the containers
-* Use the created containers to gather the output of an nmap scan against 6 targets.
+* Use the created containers to gather the output of an nmap scan against a list containing 6 targets.
 
 The result of doing this, is that acido automatically splits the target file into 3 files to scan the hosts in parallel and retrieves the output of the 3 containers.
 
@@ -164,3 +164,8 @@ Line: 684
                 return True
             ws.send(x)
         return True
+
+# Credits / Acknowledgements
+
+* Xavier Álvarez (xalvarez@merabytes.com)
+* Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)
