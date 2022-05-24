@@ -1,4 +1,4 @@
-# acido 0.12.1
+# acido 0.12.4
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -11,7 +11,7 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
     
 ### Usage:
     usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
-              [-sh SHELL] [-d DOWNLOAD_INPUT]
+              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE]
 
     optional arguments:
     -h, --help            show this help message and exit
@@ -38,6 +38,9 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
                             Execute command and upload to blob.
     -d DOWNLOAD_INPUT, --download DOWNLOAD_INPUT
                             Download file contents remotely from the acido blob.
+    -o WRITE_TO_FILE, --output WRITE_TO_FILE
+                        Save the output of the machines in JSON format.
+
 
 ### Example usage with nmap
 In this example we are going to:
@@ -109,9 +112,11 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
     Starting Nmap 7.80 ( https://nmap.org ) at ...
     ...
     ]
+    ...
+    [+] Saved output to output.json
 
 
-The result of doing this, is that acido automatically creates 2 container groups with 10 instances, splits the targets file into 20 chunks, uploads the chunks to the instances with the name "input", runs the (-t) command and after finishing, retrieves the output of the provided command of all the instances.
+The result of doing this, is that acido automatically creates 2 container groups with 10 instances, splits the targets file into 20 chunks, uploads the chunks to the instances with the name "input", runs the command provided with -t and after finishing, saves the output to a JSON file.
 
 ### Requirements
 

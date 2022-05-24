@@ -78,6 +78,10 @@ parser.add_argument("-d", "--download",
                     dest="download_input",
                     help="Download file contents remotely from the acido blob.",
                     action='store')
+parser.add_argument("-o", "--output",
+                    dest="write_to_file",
+                    help="Save the output of the machines in JSON format.",
+                    action='store')
 
 
 args = parser.parse_args()
@@ -324,7 +328,7 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, interactive=True):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, interactive=True):
         response = {}
         input_files = None
         if instance_num > 10:
@@ -421,6 +425,10 @@ class Acido(object):
                     outputs[c] = output.decode()
                 elif exception:
                     print(bad(f'Executed command on {bold(c)} Output: [\n{exception}\n]'))
+            
+            if write_to_file:
+                open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
+                print(good(f'Saved output to {write_to_file}.json'))
 
         return None if interactive else response, outputs
     
@@ -470,7 +478,7 @@ class Acido(object):
                 print(good(f'File loaded successfully.'))
         return input_file
 
-    def exec(self, command, max_retries=60, input_file: str = None):
+    def exec(self, command, max_retries=60, input_file: str = None, write_to_file: str =None):
         global instances_outputs
         self.all_instances, self.instances_named = self.ls(interactive=False)
         results = []
@@ -526,6 +534,10 @@ class Acido(object):
                     print(good(f'Executed command on {bold(c)}'))
                 else:
                     print(bad(f'Executed command on {bold(c)} Output: [\n{exception}\n]'))
+        
+        if write_to_file:
+            open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
+            print(good(f'Saved output to {write_to_file}.json'))
 
         instances_outputs = {}
 
@@ -562,13 +574,19 @@ if __name__ == "__main__":
             scan_cmd=args.task, 
             input_file=args.input_file, 
             wait=int(args.wait) if args.wait else None, 
+            write_to_file=args.write_to_file,
             interactive=bool(args.interactive)
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:
         pool = ThreadPool(processes=30)
-        acido.exec(command=args.exec_cmd, max_retries=int(args.wait) if args.wait else 60, input_file=args.input_file)
+        acido.exec(
+            command=args.exec_cmd, 
+            max_retries=int(args.wait) if args.wait else 60, 
+            input_file=args.input_file,
+            write_to_file=args.write_to_file
+        )
     if args.remove:
         acido.rm(args.remove)
     if args.interactive:
