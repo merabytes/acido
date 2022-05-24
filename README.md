@@ -172,6 +172,7 @@ Line: 684
 - [ ] Add argument to specify docker image of the fleet
 - [ ] Add argument to execute scans through the Docker ENTRYPOINT
 - [ ] Add argument to retrieve ACI logs
+- [ ] Add argument to create the fleet with a Network Group (route the traffic from all instances to a single Public IP)
 - [ ] Get rid of monkey-patching of Azure CLI
 
 # Credits / Acknowledgements
