@@ -428,7 +428,7 @@ class Acido(object):
             
             if write_to_file:
                 open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
-                print(good(f'Saved output to {write_to_file}.json'))
+                print(good(f'Saved output to {write_to_file}'))
 
         return None if interactive else response, outputs
     
@@ -450,6 +450,7 @@ class Acido(object):
         return
 
     def save_output(self, command: list = None):
+        output = None
         try:
             output = subprocess.check_output(command.split(' '))
             file, filename = self.blob_manager.upload(
@@ -468,7 +469,10 @@ class Acido(object):
         )
         if file:
             print(good(f'Uploaded input: {filename}'))
-        return filename
+            return filename
+        else:
+            print(good(f'Exception occurred.'))
+            return None
     
     def load_input(self, command_uuid: str = None, filename: str = 'input', write_to_file: bool = False):
         if command_uuid:
@@ -537,7 +541,7 @@ class Acido(object):
         
         if write_to_file:
             open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
-            print(good(f'Saved output to {write_to_file}.json'))
+            print(good(f'Saved output to {write_to_file}'))
 
         instances_outputs = {}
 
