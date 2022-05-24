@@ -88,7 +88,6 @@ instances_outputs = {}
 def build_output(result):
     global instances_outputs
     instances_outputs[result[0]] = [result[1], result[2]]
-    print(instances_outputs)
 
 def exec_command(rg, cg, cont, command, max_retries, input_file):
     env = os.environ.copy()
