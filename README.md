@@ -1,4 +1,4 @@
-# acido 0.10.13
+# acido 0.10.14
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -10,30 +10,30 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
     alias acido='python3 -m acido.cli'
     
 ### Usage:
-    usage: acido [-h] [-f FLEET] [-n NUM_INSTANCES] [-l] [-e EXEC_CMD] [-s SELECT] [-r REMOVE] [-c] [-w]
-                  [-i INPUT_FILE] [-in] [-sh SHELL] [-d DOWNLOAD_INPUT]
-    
+    usage: acido [-h] [-f FLEET] [-n NUM_INSTANCES] [-l] [-e EXEC_CMD] [-s SELECT] [-r REMOVE] [-c]
+                [-w WAIT] [-i INPUT_FILE] [-in] [-sh SHELL] [-d DOWNLOAD_INPUT]
+
     optional arguments:
-      -h, --help            show this help message and exit
-      -f FLEET, --fleet FLEET
+    -h, --help            show this help message and exit
+    -f FLEET, --fleet FLEET
                             Create new fleet.
-      -n NUM_INSTANCES, --num-instances NUM_INSTANCES
+    -n NUM_INSTANCES, --num-instances NUM_INSTANCES
                             Instances that the operation affect
-      -l, --list            List all instances.
-      -e EXEC_CMD, --exec EXEC_CMD
+    -l, --list            List all instances.
+    -e EXEC_CMD, --exec EXEC_CMD
                             Execute command in all selected instances.
-      -s SELECT, --select SELECT
+    -s SELECT, --select SELECT
                             Select instances matching name/regex.
-      -r REMOVE, --rm REMOVE
+    -r REMOVE, --rm REMOVE
                             Remove instances matching name/regex.
-      -c, --config          Start configuration of acido.
-      -w, --wait            Number of seconds to wait for the command to finish.
-      -i INPUT_FILE, --input-file INPUT_FILE
+    -c, --config          Start configuration of acido.
+    -w WAIT, --wait WAIT  Number of seconds to wait for the command to finish.
+    -i INPUT_FILE, --input-file INPUT_FILE
                             The name of the file to split.
-      -in, --interactive    Start interactive acido session.
-      -sh SHELL, --shell SHELL
+    -in, --interactive    Start interactive acido session.
+    -sh SHELL, --shell SHELL
                             Execute command and upload to blob.
-      -d DOWNLOAD_INPUT, --download DOWNLOAD_INPUT
+    -d DOWNLOAD_INPUT, --download DOWNLOAD_INPUT
                             Download file contents remotely from the acido blob.
 
 ### Example usage with nmap
@@ -43,6 +43,8 @@ In this example we are going to use acido to:
 * Use the created containers to gather the output of an nmap scan against a list containing 6 targets.
 
 The result of doing this, is that acido automatically splits the target file into 3 files to scan the hosts in parallel and retrieves the output of the 3 containers.
+
+NOTE: For scans that can take longer than 1 minute, you must specify -w TIMEOUT where timeout is the number of seconds we should wait for output.
 
 
      $ acido -f ubuntu -n 3

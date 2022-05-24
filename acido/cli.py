@@ -91,7 +91,7 @@ def exec_command(rg, cg, cont, command, max_retries, input_file):
     subprocess.Popen(["tmux", "send-keys", "-t", cont,
                     f"az container exec -g {rg} -n {cg} --container-name {cont} --exec-command /bin/bash", "Enter",
                     ], env=env)
-    time.sleep(5)
+    time.sleep(15)
     if input_file:
         subprocess.Popen(["tmux", "send-keys", "-t", cont, f"python3 -m acido.cli -d {input_file}", "Enter"], env=env)
         time.sleep(5)
