@@ -6,7 +6,7 @@ from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import *
 from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from msrestazure.azure_exceptions import CloudError
-from acido.utils.functions import chunks, jpath, expanduser
+from acido.utils.functions import chunks, jpath, expanduser, split_file
 from huepy import good, bad, info, bold, green, red, orange
 from multiprocessing.pool import ThreadPool
 import code
@@ -21,41 +21,50 @@ __author__ = "Xavier Alvarez Delgado (xalvarez@merabytes.com)"
 __coauthor__ = "Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)"
 
 parser = argparse.ArgumentParser()
+parser.add_argument("-c", "--config",
+                    dest="config",
+                    help="Start configuration of acido.",
+                    action='store_true')
 parser.add_argument("-f", "--fleet",
                     dest="fleet",
                     help="Create new fleet.",
                     action='store')
+parser.add_argument("-im", "--image",
+                    dest="image_name",
+                    help="Deploy an specific image.",
+                    action='store',
+                    default='ubuntu:20.04')
 parser.add_argument("-n", "--num-instances",
                     dest="num_instances",
                     help="Instances that the operation affect",
                     action='store')
-parser.add_argument("-l", "--list",
-                    dest="list_instances",
-                    help="List all instances.",
-                    action='store_true')
+parser.add_argument("-t", "--task",
+                    dest="task",
+                    help="Execute command as an entrypoint in the fleet.",
+                    action='store')
 parser.add_argument("-e", "--exec",
                     dest="exec_cmd",
-                    help="Execute command in all selected instances.",
+                    help="Execute command on the selected instances.",
+                    action='store')
+parser.add_argument("-i", "--input-file",
+                    dest="input_file",
+                    help="The name of the file to use on the task.",
+                    action='store')
+parser.add_argument("-w", "--wait",
+                    dest="wait",
+                    help="Set max timeout for the instance to finish.",
                     action='store')
 parser.add_argument("-s", "--select",
                     dest="select",
                     help="Select instances matching name/regex.",
                     action='store')
+parser.add_argument("-l", "--list",
+                    dest="list_instances",
+                    help="List all instances.",
+                    action='store_true')
 parser.add_argument("-r", "--rm",
                     dest="remove",
                     help="Remove instances matching name/regex.",
-                    action='store')
-parser.add_argument("-c", "--config",
-                    dest="config",
-                    help="Start configuration of acido.",
-                    action='store_true')
-parser.add_argument("-w", "--wait",
-                    dest="wait",
-                    help="Number of seconds to wait for the command to finish.",
-                    action='store')
-parser.add_argument("-i", "--input-file",
-                    dest="input_file",
-                    help="The name of the file to split.",
                     action='store')
 parser.add_argument("-in", "--interactive",
                     dest="interactive",
@@ -69,11 +78,6 @@ parser.add_argument("-d", "--download",
                     dest="download_input",
                     help="Download file contents remotely from the acido blob.",
                     action='store')
-parser.add_argument("-im", "--image",
-                    dest="image_name",
-                    help="Deploy an specific image.",
-                    action='store',
-                    default='ubuntu:20.04')
 
 
 args = parser.parse_args()
@@ -84,6 +88,7 @@ instances_outputs = {}
 def build_output(result):
     global instances_outputs
     instances_outputs[result[0]] = [result[1], result[2]]
+    print(instances_outputs)
 
 def exec_command(rg, cg, cont, command, max_retries, input_file):
     env = os.environ.copy()
@@ -170,6 +175,38 @@ def exec_command(rg, cg, cont, command, max_retries, input_file):
     subprocess.Popen(["tmux", "kill-session", "-t", cont], env=env)
 
     return cont, command_uuid, exception
+
+def wait_command(rg, cg, cont, wait=None):
+    time_spent = 0
+    exception = None
+    command_uuid = None
+    container_logs = subprocess.check_output(
+        f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
+        shell=True
+    )
+    container_logs = container_logs.decode()
+
+    while True:
+        container_logs = subprocess.check_output(
+        f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
+        shell=True
+        )
+        container_logs = container_logs.decode()
+
+        if wait and time_spent > wait:
+            exception = 'TIMEOUT REACHED'
+            break
+        if 'command: ' in container_logs:
+            command_uuid = container_logs.split('command: ')[1].strip()
+            break
+        if 'Exception' in container_logs:
+            exception = container_logs
+            break
+        time.sleep(1)
+        time_spent += 1
+
+    return cont, command_uuid, exception
+
 
 class Acido(object):
 
@@ -288,11 +325,18 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, interactive=True):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, interactive=True):
         response = {}
+        input_files = None
         if instance_num > 10:
             instance_num_groups = list(chunks(range(1, instance_num + 1), 10))
+            
+            if input_file:
+                input_filenames = split_file(input_file, instance_num)
+                input_files = [self.save_input(f) for f in input_filenames]
+
             for cg_n, ins_num in enumerate(instance_num_groups):
+                last_instance = len(ins_num)
                 env_vars = {
                     'RG': self.rg,
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
@@ -305,16 +349,23 @@ class Acido(object):
                     )
                 }
                 group_name = f'{fleet_name}-{cg_n+1:02d}'
+
                 if group_name not in response.keys():
                     response[group_name] = []
-                last_instance = len(ins_num)
-                response[group_name] = self.instance_manager.deploy(
-                                            name=group_name, 
-                                            instance_number=last_instance,
-                                            image_name=image_name,
-                                            env_vars=env_vars
-                                        )
+                
+                response[group_name], input_files = self.instance_manager.deploy(
+                            name=group_name, 
+                            instance_number=last_instance, 
+                            image_name=image_name,
+                            input_files=input_files,
+                            command=scan_cmd,
+                            env_vars=env_vars)
         else:
+
+            if input_file:
+                input_filenames = split_file(input_file, instance_num)
+                input_files = [self.save_input(f) for f in input_filenames]
+
             env_vars = {
                     'RG': self.rg,
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
@@ -326,22 +377,53 @@ class Acido(object):
                         "EndpointSuffix=core.windows.net"
                     )
             }
-            response[fleet_name] = self.instance_manager.deploy(
+
+            response[fleet_name], input_files = self.instance_manager.deploy(
                 name=fleet_name, 
                 instance_number=instance_num, 
                 image_name=image_name,
-                env_vars=env_vars)
+                command=scan_cmd,
+                env_vars=env_vars,
+                input_files=input_files)
         
+        os.system('rm -f /tmp/acido-input*')
+
         all_names = []
         all_groups = []
+        results = []
+        outputs = {}
 
-        for group, inst in response.items():
-            all_groups.append(group)
-            all_names += list(inst.keys())
+        for cg, containers in response.items():
+            all_groups.append(cg)
+            all_names += list(containers.keys())
 
         print(good(f"Successfully created new group/s: [ {bold(' '.join(all_groups))} ]"))
         print(good(f"Successfully created new instance/s: [ {bold(' '.join(all_names))} ]"))
-        return None if interactive else response
+
+        if scan_cmd:
+            print(good('Waiting 2 minutes until the machines get provisioned...'))
+            time.sleep(120)
+            print(good('Waiting for outputs...'))
+
+            for cg, containers in response.items():
+                for cont in list(containers.keys()):
+                    result = pool.apply_async(wait_command, 
+                                                (self.rg, cg, cont, wait), 
+                                                callback=build_output)
+                    results.append(result)
+
+            results = [result.wait() for result in results]
+
+            for c, o in instances_outputs.items():
+                command_uuid, exception = o
+                if command_uuid:
+                    output = self.load_input(command_uuid)
+                    print(good(f'Executed command on {bold(c)}. Output: [\n{output.decode().strip()}\n]'))
+                    outputs[c] = output.decode()
+                elif exception:
+                    print(bad(f'Executed command on {bold(c)} Output: [\n{exception}\n]'))
+
+        return None if interactive else response, outputs
     
 
     def rm(self, selection):
@@ -361,12 +443,15 @@ class Acido(object):
         return
 
     def save_output(self, command: list = None):
-        output = subprocess.check_output(command.split(' '))
-        file, filename = self.blob_manager.upload(
-            output
-        )
-        if file:
-            print(good(f'Executed command: {filename}'))
+        try:
+            output = subprocess.check_output(command.split(' '))
+            file, filename = self.blob_manager.upload(
+                output
+            )
+            if file:
+                print(good(f'Executed command: {filename}'))
+        except subprocess.CalledProcessError as e:
+            print(good(f'Exception occurred.'))
         return output
 
     def save_input(self, filename: str = None):
@@ -402,23 +487,8 @@ class Acido(object):
                     for cont in containers:
                         number_of_containers += 1
 
-            number_of_lines = [line.strip() for line in open(input_file, 'r').readlines()]
-            chunked_lines = int(len(number_of_lines) / number_of_containers)
-            print(good(f'Splitting into {number_of_containers} files.'))
-            os.system(f'split -l {str(chunked_lines)} {input_file} /tmp/acido-input-')
-        
-            directory = os.fsencode('/tmp/')
-            input_files = []
+            input_files = split_file(input_file, number_of_containers)
             input_file_index = 0
-                
-            for file in os.listdir(directory):
-                filename = os.fsdecode(file)
-                if filename.startswith("acido-input"): 
-                    input_files.append(self.save_input(f'/tmp/{filename}'))
-                else:
-                    continue
-            
-            os.system('rm -f /tmp/acido-input*')
             
             for cg, containers in self.instances_named.items():
                 if cg in self.selected_instances:
@@ -485,10 +555,16 @@ if __name__ == "__main__":
     if args.download_input:
         acido.load_input(args.download_input, write_to_file=True)
     if args.fleet:
-        image_name = args.image_name
-        fleet_name = args.fleet
-        instance_num = int(args.num_instances) if args.num_instances else 1
-        acido.fleet(fleet_name, instance_num, image_name, interactive=bool(args.interactive))
+        pool = ThreadPool(processes=30)
+        acido.fleet(
+            fleet_name=args.fleet, 
+            instance_num=int(args.num_instances) if args.num_instances else 1, 
+            image_name=args.image_name, 
+            scan_cmd=args.task, 
+            input_file=args.input_file, 
+            wait=int(args.wait) if args.wait else None, 
+            interactive=bool(args.interactive)
+        )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:

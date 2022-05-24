@@ -29,3 +29,21 @@ def chunks(iterable, chunk_size):
             if chunk:
                 yield chunk
             break
+
+def split_file(input_file, number_of_containers):
+    number_of_lines = len([line.strip() for line in open(input_file, 'r').readlines()])
+    chunked_lines = int(number_of_lines / number_of_containers)
+    print(good(f'Splitting into {number_of_containers} files.'))
+    os.system(f'split -l {str(chunked_lines)} {input_file} /tmp/acido-input-')
+
+    directory = os.fsencode('/tmp/')
+    input_files = []
+        
+    for file in os.listdir(directory):
+        filename = os.fsdecode(file)
+        if filename.startswith("acido-input"): 
+            input_files.append(f'/tmp/{filename}')
+        else:
+            continue
+
+    return input_files

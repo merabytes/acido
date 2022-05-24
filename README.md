@@ -1,4 +1,4 @@
-# acido 0.11
+# acido 0.12
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -10,26 +10,29 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
     alias acido='python3 -m acido.cli'
     
 ### Usage:
-    usage: acido [-h] [-f FLEET] [-n NUM_INSTANCES] [-l] [-e EXEC_CMD] [-s SELECT] [-r REMOVE] [-c]
-                [-w WAIT] [-i INPUT_FILE] [-in] [-sh SHELL] [-d DOWNLOAD_INPUT]
+    usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
+              [-sh SHELL] [-d DOWNLOAD_INPUT]
 
     optional arguments:
     -h, --help            show this help message and exit
+    -c, --config          Start configuration of acido.
     -f FLEET, --fleet FLEET
                             Create new fleet.
+    -im IMAGE_NAME, --image IMAGE_NAME
+                            Deploy an specific image.
     -n NUM_INSTANCES, --num-instances NUM_INSTANCES
                             Instances that the operation affect
-    -l, --list            List all instances.
+    -t TASK, --task TASK  Execute command as an entrypoint in the fleet.
     -e EXEC_CMD, --exec EXEC_CMD
-                            Execute command in all selected instances.
+                        Execute command on a running instance.
+    -i INPUT_FILE, --input-file INPUT_FILE
+                            The name of the file to use on the task.
+    -w WAIT, --wait WAIT  Set max timeout for the instance to finish.
     -s SELECT, --select SELECT
                             Select instances matching name/regex.
+    -l, --list              List all instances.
     -r REMOVE, --rm REMOVE
                             Remove instances matching name/regex.
-    -c, --config          Start configuration of acido.
-    -w WAIT, --wait WAIT  Number of seconds to wait for the command to finish.
-    -i INPUT_FILE, --input-file INPUT_FILE
-                            The name of the file to split.
     -in, --interactive    Start interactive acido session.
     -sh SHELL, --shell SHELL
                             Execute command and upload to blob.
@@ -37,106 +40,49 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
                             Download file contents remotely from the acido blob.
 
 ### Example usage with nmap
-In this example we are going to use acido to:
-* Create 3 containers
-* Install nmap on the containers
-* Use the created containers to gather the output of an nmap scan against a list containing 6 targets.
+In this example we are going to:
+* Create our base container image with acido (required) and nmap.
+* Create 20 containers.
+* Run a nmap scan using the 20 containers.
 
-The result of doing this, is that acido automatically splits the target file into 3 files to scan the hosts in parallel and retrieves the output of the 3 containers.
+#### Step 1: Create the base image
 
-NOTE: For scans that can take longer than 1 minute, you must specify -w TIMEOUT where timeout is the number of seconds we should wait for output.
+Dockerfile (merabytes.azurecr.io/ubuntu:latest):
+
+    FROM ubuntu:20.04
+
+    RUN apt-get update && apt-get install python3 python3-pip python3-dev -y
+    RUN python3 -m pip install acido
+    RUN apt-get install nmap -y
+
+    CMD ["sleep", "infinity"]
+
+This will install acido & nmap on our base docker image (merabytes.azurecr.io/ubuntu:latest).
+
+To upload the image to the registry, as always go to the folder of your Dockerfile and:
+
+    docker login merabytes.azurecr.io
+    docker build -t ubuntu .
+    docker tag ubuntu merabytes.azurecr.io/ubuntu:latest
+    docker push merabytes.azurecr.io/ubuntu:latest
+
+#### Step 2: Run the scan
 
 
-     $ acido -f ubuntu -n 3
-     [+] Selecting I/O storage account (acido).
-     [+] Successfully created new group/s: [ ubuntu ]
-     [+] Successfully created new instance/s: [ ubuntu-01 ubuntu-02 ubuntu-03 ]
-     
-     $ sleep 300
-     # Wait 300 seconds for the instances to install acido
-     
-     $ acido -s 'ubuntu'
-     [+] Selecting I/O storage account (acido).
-     [+] Selected all instances of group/s: [ ubuntu ]
-     
-     $ acido -e 'apt-get install nmap -y'
-     [+] Selecting I/O storage account (acido).
-     [+] Executed command on ubuntu-01. Output: [
-      Reading package lists...
-      ...
-      ]
-     [+] Executed command on ubuntu-02. Output: [
-      Reading package lists...
-      ...
-      ]
-     [+] Executed command on ubuntu-03. Output: [
-      Reading package lists...
-      ...
-      ]
-      
-     $ cat file.txt
-     xavi.al
-     merabytes.com
-     intimepharma.eu
-     intimetransport.eu
-     bandit.cat
-     bandit.solutions
-     
-     $ acido -e 'nmap -iL input -p 0-200' -i file.txt
-    [+] Selecting I/O storage account (acido).
-    [+] Splitting into 3 files.
-    [+] Uploaded input: 1b497def-2a1d-4e47-a6b6-99087c052cfc
-    [+] Uploaded input: 24d9e72e-8fe9-46e4-b778-d86b16847cdf
-    [+] Uploaded input: f844ae29-09bb-4849-881e-ba03eef33552
-    
-    [+] Executed command on ubuntu-01. Output: [
-    Starting Nmap 7.80 ( https://nmap.org ) at 2022-05-23 22:31 UTC
-    Nmap scan report for xavi.al (159.69.206.65)
-    ...
-    
-    Nmap scan report for merabytes.com (159.69.206.65)
-    ...
-    
-    Nmap done: 2 IP addresses (2 hosts up) scanned in 0.54 seconds
-    ]
-    
-    [+] Executed command on ubuntu-02. Output: [
-    Starting Nmap 7.80 ( https://nmap.org ) at 2022-05-23 22:31 UTC
-    Nmap scan report for intimepharma.eu (217.160.0.36)
-    ...
-    
-    Nmap scan report for intimetransport.eu (217.160.0.36)
-    ...
-    
-    Nmap done: 2 IP addresses (2 hosts up) scanned in 4.03 seconds
-    ]
-    [+] Executed command on ubuntu-03. Output: [
-    Starting Nmap 7.80 ( https://nmap.org ) at 2022-05-23 22:31 UTC
-    Nmap scan report for bandit.cat (35.214.153.47)
-    Host is up (0.014s latency).
-    ...
-    
-    Nmap scan report for bandit.solutions (35.214.153.47)
-    Host is up (0.013s latency).
-    ...
-    
-    Nmap done: 2 IP addresses (2 hosts up) scanned in 5.04 seconds
-    ]
+    $ acido -f kali -n 20 --image merabytes.azurecr.io/kali:latest -t 'nmap -iL input -p 0-200' -i file.txt
 
+The result of doing this, is that acido automatically creates 2 container groups with 10 instances, splits the targets file into 20 chunks, uploads the chunks to the instances with the name "input", runs the (-t) command and after finishing, retrieves the output of the provided command of all the instances.
 
 ### Requirements
 
-#### OS: Mac OS / Linux
+#### OS: Mac OS / Linux / Windows
 
-#### Requirement 1: Install tmux
-Because the commands are executed through multiplexing tmux is mandatory. The tool has only been tested on Mac OS, but should work on Linux.
-
-#### Requirement 2: Login to Azure & Create an Azure Container Registry
+#### Requirement 1: Login to Azure & Create an Azure Container Registry
     $ az login
     $ az acr create --resource-group Merabytes \
     --name merabytes --sku Basic
 
-#### Requirement 3: Install acido and configure your RG & Registry
+#### Requirement 2: Install acido and configure your RG & Registry
     pip install acido
     python3 -m acido.cli -c
     $ acido -c
@@ -147,8 +93,10 @@ Because the commands are executed through multiplexing tmux is mandatory. The to
     [!] Image Registry Password: *********
     $
 
-#### Requirement 4: Monkey Patching Azure CLI to use az container exec
-In order for the tool to work properly, you need to monkey-patch a bug inside **az container exec** command in the sys.stdout.write function.
+#### Optional requirement (--exec): Install tmux & Patch Azure CLI
+If you want to use --exec (similar to ssh) to execute commands on running containers having tmux installed and on PATH is mandatory. 
+
+Also, for the --exec command to work properly, you need to monkey-patch a bug inside **az container exec** command in the sys.stdout.write function.
 
 File: /lib/python3.9/site-packages/azure/cli/command_modules/container/custom.py
 
@@ -170,10 +118,11 @@ Line: 684
 # Upcoming features
 
 - [X] Add argument to specify docker image of the fleet
-- [ ] Add argument to execute scans through the Docker ENTRYPOINT
+- [X] Add argument to execute scans through the Docker ENTRYPOINT (-t / --task)
+- [ ] Test on Windows
 - [ ] Add argument to retrieve ACI logs
 - [ ] Add argument to create the fleet with a Network Group (route the traffic from all instances to a single Public IP)
-- [ ] Get rid of monkey-patching of Azure CLI
+- [ ] Get rid of monkey-patching of Azure CLI for --exec
 
 # Credits / Acknowledgements
 

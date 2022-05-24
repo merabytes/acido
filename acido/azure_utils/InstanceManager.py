@@ -8,6 +8,7 @@ from azure.mgmt.containerinstance.models import (
 from azure.mgmt.containerinstance.models import ContainerGroupIdentity, ContainerGroupIdentityUserAssignedIdentitiesValue
 from msrestazure.azure_exceptions import CloudError
 from huepy import *
+from shlex import quote
 
 __authors__ = "Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
@@ -43,9 +44,8 @@ class InstanceManager(ManagedAuthentication):
         cpu: float = 1, 
         ports=None,
         command=[
-            '/bin/sh',
-            '-c', 
-            f'apt-get update && apt-get install python3 python3-pip python3-dev -y && python3 -m pip install acido=={__version__} && sleep infinity'
+            'sleep',
+            'infinity'
         ], 
         image = 'ubuntu:20.04',
         env_vars: dict = {}
@@ -80,7 +80,8 @@ class InstanceManager(ManagedAuthentication):
         restart_policy="Never", network_profile=None, 
         instance_number: int = 3, max_ram: int = 16, 
         max_cpu: int = 4, image_name: str =None,
-        env_vars: dict = {}
+        env_vars: dict = {}, command: str = None,
+        input_files: list = None
     ):
         restart_policies = ["Always", "OnFailure", "Never"]
         if restart_policy not in restart_policies:
@@ -107,17 +108,43 @@ class InstanceManager(ManagedAuthentication):
 
         deploy_instances = []
 
+        if command:
+            command = f"python3 -m acido.cli -sh {quote(command)}"
+
         for i_num in range(1, instance_number + 1):
             env_vars['INSTANCE_NAME'] = f'{name}-{i_num:02d}'
-            deploy_instances.append(
-                self.provision(
-                    f'{name}-{i_num:02d}', 
-                    memory=float(max_ram), 
-                    cpu=float(max_cpu), 
-                    image=image_name,
-                    env_vars=env_vars
-                    )
+            scan_cmd = command
+
+            if input_files:
+                file_uuid = input_files.pop(0)
+                upload_command = f"python3 -m acido.cli -d {file_uuid}"
+                if scan_cmd:
+                    scan_cmd = upload_command + " && " + scan_cmd
+                else:
+                    scan_cmd = upload_command
+
+            if scan_cmd:
+                deploy_instances.append(
+                    self.provision(
+                        f'{name}-{i_num:02d}', 
+                        memory=float(max_ram), 
+                        cpu=float(max_cpu), 
+                        image=image_name,
+                        env_vars=env_vars,
+                        command=["/bin/sh", "-c", scan_cmd]
+                        )
                 )
+            else:
+                deploy_instances.append(
+                    self.provision(
+                        f'{name}-{i_num:02d}', 
+                        memory=float(max_ram), 
+                        cpu=float(max_cpu), 
+                        image=image_name,
+                        env_vars=env_vars,
+                        command=scan_cmd
+                        )
+                    )
 
         try:
             cg = ContainerGroup(
@@ -150,7 +177,7 @@ class InstanceManager(ManagedAuthentication):
             raise e
 
         self.env_vars.clear()
-        return results
+        return results, input_files
 
     def rm(self, group_name):
         try:
