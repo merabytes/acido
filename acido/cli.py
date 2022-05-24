@@ -52,7 +52,7 @@ parser.add_argument("-c", "--config",
 parser.add_argument("-w", "--wait",
                     dest="wait",
                     help="Number of seconds to wait for the command to finish.",
-                    action='store_true')
+                    action='store')
 parser.add_argument("-i", "--input-file",
                     dest="input_file",
                     help="The name of the file to split.",
@@ -434,12 +434,14 @@ class Acido(object):
             return
         
         results = [result.wait() for result in results]
+        outputs = {}
 
         for c, o in instances_outputs.items():
             command_uuid, exception = o
             if command_uuid:
                 output = self.load_input(command_uuid)
                 print(good(f'Executed command on {bold(c)}. Output: [\n{output.decode().strip()}\n]'))
+                outputs[c] = output.decode()
             elif exception:
                 if max_retries == 0:
                     print(good(f'Executed command on {bold(c)}'))
@@ -448,7 +450,7 @@ class Acido(object):
 
         instances_outputs = {}
 
-        return
+        return outputs
 
     def setup(self):
         rg = os.getenv('RG') if os.getenv('RG', None) else input(info('Please provide a Resource Group Name to deploy the ACIs: '))
