@@ -20,6 +20,7 @@ setup(
     version='0.10.13',
     description='Azure Container Instance Distributed Operations',
     long_description=readme,
+    long_description_content_type='text/markdown',
     author='Xavier Álvarez',
     author_email='xalvarez@merabytes.com',
     url='https://github.com/merabytes/acido',
