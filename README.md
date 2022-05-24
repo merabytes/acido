@@ -167,6 +167,13 @@ Line: 684
             ws.send(x)
         return True
 
+# Upcoming features
+
+- [ ] Add argument to specify docker image of the fleet
+- [ ] Add argument to execute scans through the Docker ENTRYPOINT
+- [ ] Add argument to retrieve ACI logs
+- [ ] Get rid of monkey-patching of Azure CLI
+
 # Credits / Acknowledgements
 
 * Xavier Álvarez (xalvarez@merabytes.com)
