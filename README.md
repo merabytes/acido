@@ -170,4 +170,4 @@ Line: 684
 # Credits / Acknowledgements
 
 * Xavier Álvarez (xalvarez@merabytes.com)
-* Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)
+* Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)
