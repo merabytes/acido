@@ -1,4 +1,4 @@
-# acido 0.10.15
+# acido 0.11
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -169,7 +169,7 @@ Line: 684
 
 # Upcoming features
 
-- [ ] Add argument to specify docker image of the fleet
+- [X] Add argument to specify docker image of the fleet
 - [ ] Add argument to execute scans through the Docker ENTRYPOINT
 - [ ] Add argument to retrieve ACI logs
 - [ ] Add argument to create the fleet with a Network Group (route the traffic from all instances to a single Public IP)

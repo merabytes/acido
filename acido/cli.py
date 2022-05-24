@@ -69,6 +69,11 @@ parser.add_argument("-d", "--download",
                     dest="download_input",
                     help="Download file contents remotely from the acido blob.",
                     action='store')
+parser.add_argument("-im", "--image",
+                    dest="image_name",
+                    help="Deploy an specific image.",
+                    action='store',
+                    default='ubuntu:20.04')
 
 
 args = parser.parse_args()
@@ -283,7 +288,7 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, interactive=True):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, interactive=True):
         response = {}
         if instance_num > 10:
             instance_num_groups = list(chunks(range(1, instance_num + 1), 10))
@@ -306,6 +311,7 @@ class Acido(object):
                 response[group_name] = self.instance_manager.deploy(
                                             name=group_name, 
                                             instance_number=last_instance,
+                                            image_name=image_name,
                                             env_vars=env_vars
                                         )
         else:
@@ -320,7 +326,11 @@ class Acido(object):
                         "EndpointSuffix=core.windows.net"
                     )
             }
-            response[fleet_name] = self.instance_manager.deploy(name=fleet_name, instance_number=instance_num, env_vars=env_vars)
+            response[fleet_name] = self.instance_manager.deploy(
+                name=fleet_name, 
+                instance_number=instance_num, 
+                image_name=image_name,
+                env_vars=env_vars)
         
         all_names = []
         all_groups = []
@@ -475,9 +485,10 @@ if __name__ == "__main__":
     if args.download_input:
         acido.load_input(args.download_input, write_to_file=True)
     if args.fleet:
-        fleet_name = args.fleet if args.fleet else 'kali'
+        image_name = args.image_name
+        fleet_name = args.fleet
         instance_num = int(args.num_instances) if args.num_instances else 1
-        acido.fleet(fleet_name, instance_num, interactive=bool(args.interactive))
+        acido.fleet(fleet_name, instance_num, image_name, interactive=bool(args.interactive))
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:

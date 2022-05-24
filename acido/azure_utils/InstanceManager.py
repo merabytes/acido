@@ -79,7 +79,8 @@ class InstanceManager(ManagedAuthentication):
         ip_address=None, os_type=OperatingSystemTypes.linux,
         restart_policy="Never", network_profile=None, 
         instance_number: int = 3, max_ram: int = 16, 
-        max_cpu: int = 4, env_vars: dict = {}
+        max_cpu: int = 4, image_name: str =None,
+        env_vars: dict = {}
     ):
         restart_policies = ["Always", "OnFailure", "Never"]
         if restart_policy not in restart_policies:
@@ -113,6 +114,7 @@ class InstanceManager(ManagedAuthentication):
                     f'{name}-{i_num:02d}', 
                     memory=float(max_ram), 
                     cpu=float(max_cpu), 
+                    image=image_name,
                     env_vars=env_vars
                     )
                 )
