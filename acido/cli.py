@@ -459,7 +459,7 @@ class Acido(object):
             if file:
                 print(good(f'Executed command: {filename}'))
         except subprocess.CalledProcessError as e:
-            print(good(f'Exception occurred.'))
+            print(bad(f'Exception occurred.'))
         return output
 
     def save_input(self, filename: str = None):
@@ -471,7 +471,7 @@ class Acido(object):
             print(good(f'Uploaded input: {filename}'))
             return filename
         else:
-            print(good(f'Exception occurred.'))
+            print(bad(f'Exception occurred.'))
             return None
     
     def load_input(self, command_uuid: str = None, filename: str = 'input', write_to_file: bool = False):
