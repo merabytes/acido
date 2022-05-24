@@ -8,7 +8,7 @@ try:
 except ImportError:
     from distutils.core import setup
 
-with open('README.md', 'r') as f:
+with open('README.md', 'r', encoding='utf8', errors='ignore') as f:
     readme = f.read()
 
 # allow setup.py to be run from any path
@@ -17,7 +17,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 setup(
     name='acido',
     packages=['acido', 'acido.azure_utils', 'acido.utils'],
-    version='0.10.14',
+    version='0.10.15',
     description='Azure Container Instance Distributed Operations',
     long_description=readme,
     long_description_content_type='text/markdown',
