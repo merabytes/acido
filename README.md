@@ -69,7 +69,12 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
 #### Step 2: Run the scan
 
 
-    $ acido -f ubuntu -n 20 --image merabytes.azurecr.io/ubuntu:latest -t 'nmap -iL input -p 0-200' -i file.txt
+    $ acido -f ubuntu \
+            -n 20 \
+            --image merabytes.azurecr.io/ubuntu:latest \
+            -t 'nmap -iL input -p 0-200' \
+            -i file.txt
+
     [+] Selecting I/O storage account (acido).
     [+] Splitting into 20 files.
     [+] Uploaded input: 743badca-c129-45e3-b319-48152d70bde8
