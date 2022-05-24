@@ -2,7 +2,7 @@ from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
 from azure.keyvault.secrets import SecretClient
 import os
 
-__authors__ = "Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)"
+__authors__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
 
 class VaultManager(ManagedAuthentication):

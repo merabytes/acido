@@ -8,7 +8,7 @@ import getpass
 from huepy import *
 import sys
 
-__author__ = "Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)"
+__author__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
 
 class ManagedAuthentication:
