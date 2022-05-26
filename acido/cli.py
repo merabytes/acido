@@ -464,6 +464,7 @@ if __name__ == "__main__":
         acido.load_input(args.download_input, write_to_file=True)
     if args.fleet:
         pool = ThreadPool(processes=30)
+        args.num_instances = int(args.num_instances) if args.num_instances else 1
         acido.fleet(
             fleet_name=args.fleet, 
             instance_num=int(args.num_instances) if args.num_instances else 1, 
