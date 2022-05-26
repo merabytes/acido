@@ -11,7 +11,7 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
     
 ### Usage:
     usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
-              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE]
+              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
 
     optional arguments:
     -h, --help            show this help message and exit
