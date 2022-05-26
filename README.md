@@ -1,4 +1,4 @@
-# acido 0.12.6
+# acido 0.12.7
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -40,6 +40,7 @@ Depending on your quota limit you may need to open a ticket to Azure to request 
                             Download file contents remotely from the acido blob.
     -o WRITE_TO_FILE, --output WRITE_TO_FILE
                         Save the output of the machines in JSON format.
+    -rwd, --rm-when-done  Remove the container groups after finish.
 
 
 ### Example usage with nmap

@@ -9,10 +9,13 @@ from azure.mgmt.containerinstance.models import ContainerGroupIdentity, Containe
 from msrestazure.azure_exceptions import CloudError
 from huepy import *
 from shlex import quote
+import logging
 
 __authors__ = "Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
 
+logger = logging.getLogger('msrest.serialization')
+logger.disabled = True
 
 class InstanceManager(ManagedAuthentication):
     def __init__(self, resource_group, login: bool = True, user_assigned: str = None):

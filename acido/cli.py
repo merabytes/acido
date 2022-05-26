@@ -1,4 +1,5 @@
 import argparse
+from asyncore import write
 import json
 import traceback
 import subprocess
@@ -16,9 +17,10 @@ import sys
 import time
 from os import mkdir, getenv
 from acido.utils.decoration import BANNER, __version__
+from acido.utils.shell_utils import wait_command, exec_command
 
 __author__ = "Xavier Alvarez Delgado (xalvarez@merabytes.com)"
-__coauthor__ = "Juan Ramón Higueras Pica (juanramon.higueras@wsg127.com)"
+__coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-c", "--config",
@@ -82,133 +84,18 @@ parser.add_argument("-o", "--output",
                     dest="write_to_file",
                     help="Save the output of the machines in JSON format.",
                     action='store')
+parser.add_argument("-rwd", "--rm-when-done",
+                    dest="rm_when_done",
+                    help="Remove the container groups after finish.",
+                    action='store_true')
 
 
 args = parser.parse_args()
-
-instances_inputs = {}
 instances_outputs = {}
 
 def build_output(result):
     global instances_outputs
     instances_outputs[result[0]] = [result[1], result[2]]
-
-def exec_command(rg, cg, cont, command, max_retries, input_file):
-    env = os.environ.copy()
-    env["PATH"] = "/usr/sbin:/sbin:" + env["PATH"]
-    # Kill tmux window
-    subprocess.Popen(["tmux", "kill-session", "-t", cont], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(2)
-    subprocess.Popen(["tmux", "new-session", "-d", "-s", cont], env=env)
-    time.sleep(5)
-    subprocess.Popen(["tmux", "send-keys", "-t", cont,
-                    f"az container exec -g {rg} -n {cg} --container-name {cont} --exec-command /bin/bash", "Enter",
-                    ], env=env)
-    time.sleep(15)
-    if input_file:
-        subprocess.Popen(["tmux", "send-keys", "-t", cont, f"python3 -m acido.cli -d {input_file}", "Enter"], env=env)
-        time.sleep(5)
-    subprocess.Popen(["tmux", "send-keys", "-t", cont, f"nohup python3 -m acido.cli -sh '{command}' > temp &", "Enter"], env=env)
-    time.sleep(2)
-    subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
-
-    output = subprocess.check_output(["tmux", "capture-pane", "-pt", cont], env=env).decode()
-
-    time.sleep(4)
-
-    retries = 0
-    failed = False
-    exception = None
-    command_uuid = None
-
-    while 'Done' not in output:
-
-        retries += 1
-
-        if retries > max_retries:
-            exception = 'TIMEOUT REACHED'
-            failed = True
-            break
-
-        subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
-        time.sleep(1)
-        output = subprocess.check_output(["tmux", "capture-pane", "-pt", cont], env=env).decode()
-
-        if 'Exit' in output:
-            subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
-            time.sleep(2)
-            subprocess.Popen(["tmux", "send-keys", "-t", cont, "cat temp", "Enter", "Enter"], env=env)
-            time.sleep(2)
-            subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
-            time.sleep(2)
-            try:
-                exception = subprocess.check_output(["tmux", "capture-pane", "-pt", cont], env=env)
-                exception = exception.decode()
-                exception = exception.split('cat temp')[1].strip()
-            except Exception as e:
-                exception = 'ERROR PARSING'
-                print(bad(f'Error capturing output from: {bold(cont)}'))
-            failed = True
-            break
-        if 'Done' in output:
-            failed = False
-            break
-
-    if not failed:
-        subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
-        time.sleep(2)
-        subprocess.Popen(["tmux", "send-keys", "-t", cont, "cat temp", "Enter", "Enter"], env=env)
-        time.sleep(10)
-        subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
-        time.sleep(2)
-        try:
-            output = subprocess.check_output(["tmux", "capture-pane", "-pt", cont], env=env)
-            output = output.decode()
-            command_uuid = output.split('command: ')[1].split('\n')[0].strip()
-        except Exception as e:
-            command_uuid = None
-            print(bad(f'Error capturing output from: {bold(cont)}'))
-    else:
-        print(bad(f'Exception ocurred while executing "{command}" from: {bold(cont)}'))
-
-    # Kill shell
-    subprocess.Popen(["tmux", "send-keys", "-t", cont, "(rm temp && exit)", "Enter"], env=env)
-    time.sleep(1)
-    # Kill tmux window
-    subprocess.Popen(["tmux", "kill-session", "-t", cont], env=env)
-
-    return cont, command_uuid, exception
-
-def wait_command(rg, cg, cont, wait=None):
-    time_spent = 0
-    exception = None
-    command_uuid = None
-    container_logs = subprocess.check_output(
-        f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
-        shell=True
-    )
-    container_logs = container_logs.decode()
-
-    while True:
-        container_logs = subprocess.check_output(
-        f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
-        shell=True
-        )
-        container_logs = container_logs.decode()
-
-        if wait and time_spent > wait:
-            exception = 'TIMEOUT REACHED'
-            break
-        if 'command: ' in container_logs:
-            command_uuid = container_logs.split('command: ')[1].strip()
-            break
-        if 'Exception' in container_logs:
-            exception = container_logs
-            break
-        time.sleep(1)
-        time_spent += 1
-
-    return cont, command_uuid, exception
 
 
 class Acido(object):
@@ -246,6 +133,7 @@ class Acido(object):
             az_identity_list = json.loads(az_identity_list)
             self.user_assigned = az_identity_list
         except Exception as e:
+            print(bad('Error while trying to get/create user assigned identity.'))
             self.user_assigned = None
 
         im = InstanceManager(self.rg, login, self.user_assigned)
@@ -428,7 +316,9 @@ class Acido(object):
             
             if write_to_file:
                 open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
-                print(good(f'Saved output to {write_to_file}'))
+                print(good(f'Saved container outputs to {write_to_file}.json'))
+                open(f'all_{write_to_file}.txt', 'w').write('\n'.join([o.rstrip() for o in outputs.values()]))
+                print(good(f'Saved merged outputs at: all_{write_to_file}.txt'))
 
         return None if interactive else response, outputs
     
@@ -540,8 +430,11 @@ class Acido(object):
                     print(bad(f'Executed command on {bold(c)} Output: [\n{exception}\n]'))
         
         if write_to_file:
-            open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
-            print(good(f'Saved output to {write_to_file}'))
+            open(f'{write_to_file}.json', 'w').write(json.dumps(outputs, indent=4))
+            print(good(f'Saved JSON output at: {write_to_file}'))
+            open(f'all_{write_to_file}', 'w').write('\n'.join([o.rstrip() for o in outputs.values()]))
+            print(good(f'Saved merged outputs at: {write_to_file}'))
+
 
         instances_outputs = {}
 
@@ -581,6 +474,8 @@ if __name__ == "__main__":
             write_to_file=args.write_to_file,
             interactive=bool(args.interactive)
         )
+        if args.rm_when_done:
+            acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:
