@@ -89,15 +89,15 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
     [+] Selecting I/O storage account (acido).
     [+] Splitting into 20 files.
     [+] Uploaded 20 targets lists.
-    [+] Successfully created new group/s: [ kali-01 kali-02 ]
-    [+] Successfully created new instance/s: [ kali-01-01 kali-01-02 kali-01-03 kali-01-04 kali-01-05 kali-01-06 kali-01-07 kali-01-08 kali-01-09 kali-01-10 kali-02-01 kali-02-02 kali-02-03 kali-02-04 kali-02-05 kali-02-06 kali-02-07 kali-02-08 kali-02-09 kali-02-10 ]
+    [+] Successfully created new group/s: [ ubuntu-01 ubuntu-02 ]
+    [+] Successfully created new instance/s: [ ubuntu-01-01 ubuntu-01-02 ubuntu-01-03 ubuntu-01-04 ubuntu-01-05 ubuntu-01-06 ubuntu-01-07 ubuntu-01-08 ubuntu-01-09 ubuntu-01-10 ubuntu-02-01 ubuntu-02-02 ubuntu-02-03 ubuntu-02-04 ubuntu-02-05 ubuntu-02-06 ubuntu-02-07 ubuntu-02-08 ubuntu-02-09 ubuntu-02-10 ]
     [+] Waiting 2 minutes until the machines get provisioned...
     [+] Waiting for outputs...
-    [+] Executed command on kali-02-01. Output: [
+    [+] Executed command on ubuntu-02-01. Output: [
     Starting Nmap 7.80 ( https://nmap.org ) at ...
     ...
     ]
-    [+] Executed command on kali-02-02. Output: [
+    [+] Executed command on ubuntu-02-02. Output: [
     Starting Nmap 7.80 ( https://nmap.org ) at ...
     ...
     ]
