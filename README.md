@@ -73,12 +73,18 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
 #### Step 2: Run the scan
 
 
+    $ cat file.txt
+    merabytes.com
+    uber.com
+    facebook.com
+    ...
+
     $ acido -f ubuntu \
             -n 20 \
             --image merabytes.azurecr.io/ubuntu:latest \
             -t 'nmap -iL input -p 0-200' \
             -i file.txt \
-            -o output.json
+            -o output
 
     [+] Selecting I/O storage account (acido).
     [+] Splitting into 20 files.
@@ -96,7 +102,8 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
     ...
     ]
     ...
-    [+] Saved output to output.json
+    [+] Saved container outputs at: output.json
+    [+] Saved merged outputs at: all_output.txt.
 
 
 The result of doing this, is that acido automatically creates 2 container groups with 10 instances, splits the targets file into 20 chunks, uploads the chunks to the instances with the name "input", runs the command provided with -t and after finishing, saves the output to a JSON file.

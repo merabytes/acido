@@ -317,7 +317,7 @@ class Acido(object):
             
             if write_to_file:
                 open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
-                print(good(f'Saved container outputs to {write_to_file}.json'))
+                print(good(f'Saved container outputs at: {write_to_file}.json'))
                 open(f'all_{write_to_file}.txt', 'w').write('\n'.join([o.rstrip() for o in outputs.values()]))
                 print(good(f'Saved merged outputs at: all_{write_to_file}.txt'))
 
