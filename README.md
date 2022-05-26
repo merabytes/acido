@@ -82,26 +82,7 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
 
     [+] Selecting I/O storage account (acido).
     [+] Splitting into 20 files.
-    [+] Uploaded input: 743badca-c129-45e3-b319-48152d70bde8
-    [+] Uploaded input: 593afcbb-7c8d-4b45-9e00-fdffb35c1f0a
-    [+] Uploaded input: a8d960fc-df25-445c-8289-14e8bd9b2e9f
-    [+] Uploaded input: 38db1738-b065-4cc6-93be-9adb293e7182
-    [+] Uploaded input: 93658a3c-e149-4a1c-9b5f-31d4961365f6
-    [+] Uploaded input: 97b0b8d4-3d71-441c-a7c9-cca84784f2b1
-    [+] Uploaded input: da209dc8-cbd5-41b8-b9fb-1988fd1c1c53
-    [+] Uploaded input: 61cb70e8-de10-458d-8219-eed59e4728c5
-    [+] Uploaded input: 8aa5f87c-0566-466f-97a1-7117780f4ced
-    [+] Uploaded input: fa179d8d-a1ec-4839-a5b1-520d976193ba
-    [+] Uploaded input: 8ea933b5-d719-49dc-bda7-094ccf970b9b
-    [+] Uploaded input: bb6c648b-61cd-4c6f-a58c-25ad8f9bdd4e
-    [+] Uploaded input: cf363d1f-e3de-46d2-a660-53c1ca63e3e5
-    [+] Uploaded input: f6bab538-ec94-4a26-8589-1b13e0dacc8f
-    [+] Uploaded input: af92c787-e21d-414f-9469-1747a5c6fc89
-    [+] Uploaded input: 62689030-2051-43df-bb59-cab3e8af029b
-    [+] Uploaded input: 7f3c297d-bb46-41a2-8e05-7f30cd84d03b
-    [+] Uploaded input: 55552c9a-c52c-495d-82d5-6ed71b6f5955
-    [+] Uploaded input: fa8ee6f4-093c-4f0e-aba7-03dbfaed1104
-    [+] Uploaded input: 2184758f-1d0b-469d-aa21-1d09f5dba8ac
+    [+] Uploaded 20 targets lists.
     [+] Successfully created new group/s: [ kali-01 kali-02 ]
     [+] Successfully created new instance/s: [ kali-01-01 kali-01-02 kali-01-03 kali-01-04 kali-01-05 kali-01-06 kali-01-07 kali-01-08 kali-01-09 kali-01-10 kali-02-01 kali-02-02 kali-02-03 kali-02-04 kali-02-05 kali-02-06 kali-02-07 kali-02-08 kali-02-09 kali-02-10 ]
     [+] Waiting 2 minutes until the machines get provisioned...

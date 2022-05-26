@@ -225,6 +225,7 @@ class Acido(object):
             if input_file:
                 input_filenames = split_file(input_file, instance_num)
                 input_files = [self.save_input(f) for f in input_filenames]
+                print(good(f'Uploaded {len(input_files)} target lists.'))
 
             for cg_n, ins_num in enumerate(instance_num_groups):
                 last_instance = len(ins_num)
@@ -358,10 +359,9 @@ class Acido(object):
             file_contents
         )
         if file:
-            print(good(f'Uploaded input: {filename}'))
             return filename
         else:
-            print(bad(f'Exception occurred.'))
+            print(bad(f'Exception occurred while uploading file.'))
             return None
     
     def load_input(self, command_uuid: str = None, filename: str = 'input', write_to_file: bool = False):
