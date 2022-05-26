@@ -77,7 +77,8 @@ To upload the image to the registry, as always go to the folder of your Dockerfi
             -n 20 \
             --image merabytes.azurecr.io/ubuntu:latest \
             -t 'nmap -iL input -p 0-200' \
-            -i file.txt
+            -i file.txt \
+            -o output.json
 
     [+] Selecting I/O storage account (acido).
     [+] Splitting into 20 files.
