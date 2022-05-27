@@ -6,6 +6,10 @@ This tool is inspired by [axiom](https://github.com/pry0cc/axiom) where you can 
 
 Depending on your quota limit you may need to open a ticket to Azure to request container group limits increase.
 
+A little diagram on how the tool works:
+
+![acido](https://user-images.githubusercontent.com/15344287/170670823-1e3b0de3-2834-4d38-a21d-368c50f073d3.png)
+
 ### Add an alias in .bashrc / .zshrc:
     alias acido='python3 -m acido.cli'
     
