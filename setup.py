@@ -17,7 +17,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 setup(
     name='acido',
     packages=['acido', 'acido.azure_utils', 'acido.utils'],
-    version='0.13',
+    version='0.14',
     description='Azure Container Instance Distributed Operations',
     long_description=readme,
     long_description_content_type='text/markdown',
@@ -35,7 +35,8 @@ setup(
         'PyJWT==1.7.1',
         'websockets',
         'huepy',
-        'msrestazure'
+        'msrestazure',
+        'beaupy'
     ],
     keywords=[
         'Security',

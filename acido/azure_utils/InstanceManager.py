@@ -18,7 +18,7 @@ logger = logging.getLogger('msrest.serialization')
 logger.disabled = True
 
 class InstanceManager(ManagedAuthentication):
-    def __init__(self, resource_group, login: bool = True, user_assigned: str = None):
+    def __init__(self, resource_group, login: bool = True, user_assigned: str = None, network_profile=None):
         if login:
             credential = self.get_credential(Resources.INSTANCE)
             subscription = self.extract_subscription(credential)
@@ -28,6 +28,7 @@ class InstanceManager(ManagedAuthentication):
             )
         self.resource_group = resource_group
         self.image_registry_credentials = None
+        self.network_profile = network_profile
         self.env_vars = {}
         self.instances = []
         self.user_assigned = user_assigned
@@ -99,9 +100,6 @@ class InstanceManager(ManagedAuthentication):
         if self.image_registry_credentials:
             ir_credentials = [self.image_registry_credentials]
 
-        if network_profile:
-            network_profile = ContainerGroupNetworkProtocol(id=network_profile)
-
         max_ram = "{:.1f}".format(max_ram / (instance_number + 1))
         max_cpu = "{:.1f}".format(max_cpu / (instance_number + 1)) 
 
@@ -112,7 +110,7 @@ class InstanceManager(ManagedAuthentication):
         deploy_instances = []
 
         if command:
-            command = f"python3 -m acido.cli -sh {quote(command)}"
+            command = f"env/bin/python3 -m acido.cli -sh {quote(command)}"
 
         for i_num in range(1, instance_number + 1):
             env_vars['INSTANCE_NAME'] = f'{name}-{i_num:02d}'
@@ -120,7 +118,7 @@ class InstanceManager(ManagedAuthentication):
 
             if input_files:
                 file_uuid = input_files.pop(0)
-                upload_command = f"python3 -m acido.cli -d {file_uuid}"
+                upload_command = f"env/bin/python3 -m acido.cli -d {file_uuid}"
                 if scan_cmd:
                     scan_cmd = upload_command + " && " + scan_cmd
                 else:
@@ -158,7 +156,7 @@ class InstanceManager(ManagedAuthentication):
                 image_registry_credentials=ir_credentials,  # noqa: E501
                 restart_policy=restart_policy,
                 tags=tags,
-                network_profile=network_profile,
+                network_profile=self.network_profile,
                 identity=ContainerGroupIdentity(
                     type=ResourceIdentityType.user_assigned,
                     user_assigned_identities={

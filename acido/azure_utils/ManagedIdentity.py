@@ -130,3 +130,4 @@ class Resources:
     INSTANCE = "instance"
     VAULT = "vault"
     BLOB = "blob"
+    NETWORK = "network"

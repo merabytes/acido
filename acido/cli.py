@@ -3,8 +3,12 @@ from asyncore import write
 import json
 import traceback
 import subprocess
+from beaupy import select
+from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, ContainerNetworkInterfaceIpConfiguration, IPConfigurationProfile
+from azure.mgmt.containerinstance.models import ContainerGroupNetworkProfile
 from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import *
+from acido.azure_utils.NetworkManager import *
 from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from msrestazure.azure_exceptions import CloudError
 from acido.utils.functions import chunks, jpath, expanduser, split_file
@@ -36,6 +40,16 @@ parser.add_argument("-im", "--image",
                     help="Deploy an specific image.",
                     action='store',
                     default='ubuntu:20.04')
+parser.add_argument("--create-ip",
+                    dest="create_ip",
+                    help="Create a new IPv4 address.",
+                    action='store',
+                    default='')
+parser.add_argument("--ip",
+                    dest="ipv4_address",
+                    help="Route containers through an specific IPv4 address.",
+                    action='store_true',
+                    default=False)
 parser.add_argument("-n", "--num-instances",
                     dest="num_instances",
                     help="Instances that the operation affect",
@@ -111,6 +125,7 @@ class Acido(object):
         self.image_registry_password = None
         self.user_assigned = None
         self.rg = None
+        self.network_profile = None
 
         if rg:
             self.rg = rg
@@ -136,7 +151,7 @@ class Acido(object):
             print(bad('Error while trying to get/create user assigned identity.'))
             self.user_assigned = None
 
-        im = InstanceManager(self.rg, login, self.user_assigned)
+        im = InstanceManager(self.rg, login, self.user_assigned, self.network_profile)
         im.login_image_registry(
             self.image_registry_server, 
             self.image_registry_username, 
@@ -147,6 +162,19 @@ class Acido(object):
         self.blob_manager.use_container(container_name='acido', create_if_not_exists=True)
         self.all_instances, self.instances_named = self.ls(interactive=False)
 
+        self.network_manager = NetworkManager(resource_group=self.rg)
+
+        if args.create_ip:
+            public_ip_name = args.create_ip
+            self.create_ipv4_address(public_ip_name)
+            self.select_ipv4_address()
+
+        if args.ipv4_address:
+            self.select_ipv4_address()
+        
+        self.instance_manager.network_profile = self.network_profile
+
+
     def _save_config(self):
         home = expanduser("~")
         config = {
@@ -155,7 +183,8 @@ class Acido(object):
             'image_registry_username': self.image_registry_username,
             'image_registry_password': self.image_registry_password,
             'image_registry_server': self.image_registry_server,
-            'user_assigned_id': self.user_assigned
+            'user_assigned_id': self.user_assigned,
+            'network_profile': self.network_profile
         }
 
         try:
@@ -181,12 +210,77 @@ class Acido(object):
             config = json.loads(conf.read())
         
         for key, value in config.items():
-            if key == 'rg' and self.rg:
+            if key == 'rg' and self.rg is not None:
                 continue
-            setattr(self, key, value)
+            else:
+                setattr(self, key, value)
 
         self._save_config()
 
+    def create_ipv4_address(self, public_ip_name):
+        if self.network_manager is None:
+            print(bad("Network manager is not initialized. Please provide a resource group."))
+            return
+        
+        # Step 0: Delete NetworkProfile
+        # self.network_manager.delete_resources(public_ip_name)
+
+        # Step 1: Create a new Public IP Address
+        ipv4_address_id = self.network_manager.create_ipv4(public_ip_name)
+
+        # Step 2: Create a Virtual Network
+        vnet_name = f'{public_ip_name}-vnet'
+        subnet_name = f'{public_ip_name}-subnet'
+        vnet_params = self.network_manager.create_virtual_network(vnet_name)
+        subnet_params = self.network_manager.create_subnet(vnet_name, subnet_name, ip_address=ipv4_address_id)
+
+        # Step 3: Create a Network Profile
+        network_profile_name = f'{public_ip_name}-network-profile'
+        container_network_interface_config = ContainerNetworkInterfaceConfiguration(
+            name=f'{public_ip_name}-cnic',
+            ip_configurations=[
+                IPConfigurationProfile(
+                    name=f'{public_ip_name}-ip-config',
+                    subnet=subnet_params
+                )
+            ]
+        )
+        network_profile_params = NetworkProfile(
+            location='westeurope',  # replace 'your-location' with your actual Azure location
+            container_network_interface_configurations=[container_network_interface_config]
+        )
+        network_profile = self.network_manager.create_network_profile(
+            network_profile_name, network_profile_params)
+        
+        self.network_profile = {'id': network_profile.id}
+
+        self._save_config()
+
+        print(good(f"Network Profile {network_profile_name} created successfully."))
+
+
+    def select_ipv4_address(self):
+        if self.network_manager is None:
+            print(bad("Network manager is not initialized. Please provide a resource group."))
+            return
+        
+        ip_addresses_info = self.network_manager.list_ipv4()
+        
+        # Create a list of IP addresses and an associated descriptive list
+        ip_addresses = [info['ip_address'] for info in ip_addresses_info if info['ip_address']]  # Filter out None values
+        ip_descriptions = [f"{info['name']} ({info['ip_address']})" for info in ip_addresses_info if info['ip_address']]  # Filter out None values
+        
+        # Now use beaupy to create an interactive selector.
+        print(good("Please select an IP address:"))
+        selected_description = select(ip_descriptions, cursor_style="cyan")
+        
+        # Extract the selected IP address from the description
+        selected_ip_address = selected_description.split(' ')[-1][1:-1]  # Assumes the format is 'name (ip_address)'
+        network_profile_prefix = selected_description.split(' ')[0]  # Assumes the format is 'name (ip_address)'
+        self.network_profile = {'id': self.network_manager.get_network_profile(resource_name=network_profile_prefix).id}
+        self._save_config()
+        
+        print(good(f"You selected IP address: {selected_ip_address} from network profile {self.network_profile}"))
 
     def ls(self, interactive=True):
         all_instances = {}
@@ -251,6 +345,7 @@ class Acido(object):
                             image_name=image_name,
                             input_files=input_files,
                             command=scan_cmd,
+                            network_profile=self.network_profile,
                             env_vars=env_vars)
         else:
 
@@ -276,6 +371,7 @@ class Acido(object):
                 image_name=image_name,
                 command=scan_cmd,
                 env_vars=env_vars,
+                network_profile=self.network_profile,
                 input_files=input_files)
         
         os.system('rm -f /tmp/acido-input*')
@@ -293,8 +389,8 @@ class Acido(object):
         print(good(f"Successfully created new instance/s: [ {bold(' '.join(all_names))} ]"))
 
         if scan_cmd:
-            print(good('Waiting 2 minutes until the machines get provisioned...'))
-            time.sleep(120)
+            print(good('Waiting 4 minutes until the machines get provisioned...'))
+            time.sleep(240)
             print(good('Waiting for outputs...'))
 
             for cg, containers in response.items():

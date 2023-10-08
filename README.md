@@ -132,6 +132,34 @@ The result of doing this, is that acido automatically creates 2 container groups
     [!] Image Registry Password: *********
     $
 
+### Troubleshooting
+
+#### Setting Flags for OpenSSL on Devices using Apple Silicon
+
+If you are on an Apple Silicon device, follow these steps to install `openssl@1.1` and set the necessary environment variables:
+
+1. **Install OpenSSL@1.1**:
+    Use Homebrew to install `openssl@1.1`.
+    ```bash
+    brew install openssl@1.1
+    ```
+
+2. **Set Environment Variables**:
+    Export the necessary environment variables to point to the correct library and include directories.
+    ```bash
+    export LDFLAGS="-L/opt/homebrew/opt/openssl@1.1/lib"
+    export CPPFLAGS="-I/opt/homebrew/opt/openssl@1.1/include"
+    ```
+
+3. **Verify Your Configuration**:
+    You can verify the installation and see the suggested environment variables by checking the information provided by Homebrew.
+    ```bash
+    brew info openssl
+    ```
+
+By following these steps, you should have `openssl@1.1` installed and the necessary flags set for your Apple Silicon device.
+
+
 #### Optional requirement (--exec): Install tmux & Patch Azure CLI
 If you want to use --exec (similar to ssh) to execute commands on running containers having tmux installed and on PATH is mandatory. 
 
