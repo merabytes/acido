@@ -4,8 +4,8 @@ from azure.mgmt.containerinstance import ContainerInstanceManagementClient
 from azure.mgmt.containerinstance.models import (
     ContainerGroup, Container, ImageRegistryCredential, ResourceRequirements,
     ResourceRequests, OperatingSystemTypes, EnvironmentVariable,
-    ContainerGroupNetworkProtocol, ResourceIdentityType, ContainerExec, ContainerExecRequestTerminalSize, ContainerExecResponse)
-from azure.mgmt.containerinstance.models import ContainerGroupIdentity, ContainerGroupIdentityUserAssignedIdentitiesValue
+    ResourceIdentityType)
+from azure.mgmt.containerinstance.models import ContainerGroupIdentity, UserAssignedIdentities
 from msrestazure.azure_exceptions import CloudError
 from huepy import *
 from shlex import quote
@@ -160,7 +160,7 @@ class InstanceManager(ManagedAuthentication):
                 identity=ContainerGroupIdentity(
                     type=ResourceIdentityType.user_assigned,
                     user_assigned_identities={
-                        self.user_assigned['id']: ContainerGroupIdentityUserAssignedIdentitiesValue(client_id=self.user_assigned['clientId'])
+                        self.user_assigned['id']: UserAssignedIdentities(client_id=self.user_assigned['clientId'])
                     }
                 )
             )

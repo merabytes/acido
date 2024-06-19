@@ -1,25 +1,20 @@
 import argparse
-from asyncore import write
 import json
-import traceback
 import subprocess
 from beaupy import select
-from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, ContainerNetworkInterfaceIpConfiguration, IPConfigurationProfile
-from azure.mgmt.containerinstance.models import ContainerGroupNetworkProfile
+from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
+from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import *
 from acido.azure_utils.NetworkManager import *
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication
-from msrestazure.azure_exceptions import CloudError
 from acido.utils.functions import chunks, jpath, expanduser, split_file
 from huepy import good, bad, info, bold, green, red, orange
 from multiprocessing.pool import ThreadPool
 import code
 import re
 import os
-import sys
 import time
-from os import mkdir, getenv
+from os import mkdir
 from acido.utils.decoration import BANNER, __version__
 from acido.utils.shell_utils import wait_command, exec_command
 
@@ -123,6 +118,7 @@ class Acido(object):
         self.image_registry_server = None
         self.image_registry_username = None
         self.image_registry_password = None
+        self.storage_account = None
         self.user_assigned = None
         self.rg = None
         self.network_profile = None
@@ -132,10 +128,8 @@ class Acido(object):
 
         self.io_blob = None
 
-        try:
-            self.rows, self.cols = os.popen('stty size', 'r').read().split()
-        except:
-            self.rows, self.cols = 55, 160
+        if args.config:
+            self.setup()
         
         try:
             self._load_config()
@@ -158,7 +152,7 @@ class Acido(object):
             self.image_registry_password
         )
         self.instance_manager = im
-        self.blob_manager = BlobManager(resource_group=self.rg, account_name='acido')
+        self.blob_manager = BlobManager(resource_group=self.rg, account_name=self.storage_account)
         self.blob_manager.use_container(container_name='acido', create_if_not_exists=True)
         self.all_instances, self.instances_named = self.ls(interactive=False)
 
@@ -183,6 +177,7 @@ class Acido(object):
             'image_registry_username': self.image_registry_username,
             'image_registry_password': self.image_registry_password,
             'image_registry_server': self.image_registry_server,
+            'storage_account': self.storage_account,
             'user_assigned_id': self.user_assigned,
             'network_profile': self.network_profile
         }
@@ -542,10 +537,42 @@ class Acido(object):
         image_registry_server = os.getenv('IMAGE_REGISTRY_SERVER') if os.getenv('RG', None) else input(info('Image Registry Server: '))
         image_registry_username = os.getenv('IMAGE_REGISTRY_USERNAME') if os.getenv('IMAGE_REGISTRY_USERNAME', None) else input(info('Image Registry Username: '))
         image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else input(info('Image Registry Password: '))
+        storage_account = os.getenv('STORAGE_ACCOUNT_NAME') if os.getenv('STORAGE_ACCOUNT_NAME', None) else input(info('Storage Account Name to Use: '))
+        if not os.getenv('STORAGE_ACCOUNT_NAME', None):
+            auth = ManagedAuthentication()
+            credential = auth.get_credential(Resources.BLOB)
+            subscription = auth.extract_subscription(credential)
+            client = StorageManagementClient(
+                credential,
+                subscription
+            )
+            availability_result = client.storage_accounts.check_name_availability(
+                    { "name": storage_account }
+                )
+            while not availability_result:
+                bad(f'Storage account name "{storage_account}" is not available. Please select another one.')
+                storage_account = input(info('Storage Account Name to Use: '))
+                availability_result = client.storage_accounts.check_name_availability(
+                    { "name": storage_account }
+                )
+            info(f'Creating storage account "{storage_account}"...')
+            poller = client.storage_accounts.begin_create(self.rg, storage_account,
+                parameters={
+                        "location" : "westeurope",
+                        "kind": "StorageV2",
+                        "sku": {"name": "Standard_LRS"}
+                    }
+                )
+            poller.result()
+            good('Storage account created.')
+            self.blob_manager = BlobManager(resource_group=self.rg, account_name=self.storage_account)
+            self.blob_manager.use_container(container_name='acido', create_if_not_exists=True)
+            good('Using private storage account blob container "acido".')
         self.selected_instances = []
         self.image_registry_server = image_registry_server
         self.image_registry_username = image_registry_username
         self.image_registry_password = image_registry_password
+        self.storage_account = storage_account
         self._save_config()
 
 if __name__ == "__main__":

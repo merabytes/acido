@@ -1,5 +1,6 @@
-import traceback
 import azure.common.credentials
+from azure.identity import AzureCliCredential
+from azure.mgmt.resource import SubscriptionClient
 import azure.identity
 import msrestazure.azure_active_directory
 import os as _os
@@ -7,6 +8,7 @@ import jwt as _jwt
 import getpass
 from huepy import *
 import sys
+import traceback
 
 __author__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
@@ -73,9 +75,8 @@ class ManagedAuthentication:
 
     def get_cli_credential(self, resource):
         try:
-            cred, sub = azure.common.credentials.get_azure_cli_credentials()
+            cred = AzureCliCredential()
         except Exception:
-            import traceback
             print(traceback.format_exc())
             return None
         return cred
@@ -109,8 +110,8 @@ class ManagedAuthentication:
         return force or auto
 
     def extract_subscription(self, credential):
-        if isinstance(credential, azure.common.credentials._CliCredentials):
-            return azure.common.credentials.get_azure_cli_credentials()[1]
+        if isinstance(credential, azure.identity._credentials.azure_cli.AzureCliCredential):
+            return SubscriptionClient(credential).subscriptions.list().next().id.split("/")[2]
         else:
             if credential:
                 obj = _jwt.decode(credential.token['access_token'], verify=False)

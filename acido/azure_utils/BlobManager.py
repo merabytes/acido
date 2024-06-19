@@ -1,7 +1,6 @@
 from azure.storage.blob import BlobServiceClient
 from uuid import uuid4 as uuid
 from azure.core.exceptions import ResourceNotFoundError
-from azure.mgmt.resource import ResourceManagementClient
 from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
 from huepy import *
@@ -36,25 +35,10 @@ class BlobManager(ManagedAuthentication):
             self.url = f"https://{account_name}.blob.core.windows.net"
             credential = self.get_credential(Resources.BLOB)
             subscription = self.extract_subscription(credential)
-            self._resource_client = ResourceManagementClient(credential, subscription)
             self._client = StorageManagementClient(
                 credential,
                 subscription
             )
-            availability_result = self._client.storage_accounts.check_name_availability(
-                { "name": account_name }
-            )
-            if availability_result:
-                poller = self._client.storage_accounts.begin_create(resource_group_name, account_name,
-                parameters={
-                        "location" : "westeurope",
-                        "kind": "StorageV2",
-                        "sku": {"name": "Standard_LRS"}
-                    }
-                )
-                poller.result()
-                print(good(f'Selecting I/O storage account ({account_name}).'))
-            
             account_key = self._client.storage_accounts.list_keys(resource_group_name, account_name).keys[0].value
             self.account_name = account_name
             self.account_key = account_key
@@ -76,9 +60,8 @@ class BlobManager(ManagedAuthentication):
 
     def check_access(self, client: BlobServiceClient) -> bool:
         try:
-            client.list_containers().next()
+            client.list_containers()
         except Exception as e:
-            print(e)
             return False
         return True
 
