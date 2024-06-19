@@ -110,7 +110,7 @@ class InstanceManager(ManagedAuthentication):
         deploy_instances = []
 
         if command:
-            command = f"env/bin/python3 -m acido.cli -sh {quote(command)}"
+            command = f"python3 -m acido.cli -sh {quote(command)}"
 
         for i_num in range(1, instance_number + 1):
             env_vars['INSTANCE_NAME'] = f'{name}-{i_num:02d}'
@@ -118,7 +118,7 @@ class InstanceManager(ManagedAuthentication):
 
             if input_files:
                 file_uuid = input_files.pop(0)
-                upload_command = f"env/bin/python3 -m acido.cli -d {file_uuid}"
+                upload_command = f"python3 -m acido.cli -d {file_uuid}"
                 if scan_cmd:
                     scan_cmd = upload_command + " && " + scan_cmd
                 else:
@@ -164,11 +164,11 @@ class InstanceManager(ManagedAuthentication):
                     }
                 )
             )
-            self._client.container_groups.create_or_update(
+            self._client.container_groups.begin_create_or_update(
                 resource_group_name=self.resource_group,
                 container_group_name=name,
                 container_group=cg
-            )
+            ).result()
             ok = True
             for i_num in range(1, instance_number + 1):
                 results[f'{name}-{i_num:02d}'] = ok

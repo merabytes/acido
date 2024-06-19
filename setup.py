@@ -32,6 +32,7 @@ setup(
         'azure.identity==1.17.0',
         'azure.keyvault.secrets==4.7.0',
         'azure.storage.blob==12.20.0',
+        'azure.mgmt.network==25.4.0',
         'websockets==12.0',
         'huepy==1.2.1',
         'msrestazure==0.6.4.post1',

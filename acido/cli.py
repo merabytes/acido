@@ -5,8 +5,8 @@ from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.BlobManager import BlobManager
-from acido.azure_utils.InstanceManager import *
-from acido.azure_utils.NetworkManager import *
+from acido.azure_utils.InstanceManager import InstanceManager
+from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
 from acido.utils.functions import chunks, jpath, expanduser, split_file
 from huepy import good, bad, info, bold, green, red, orange
 from multiprocessing.pool import ThreadPool
