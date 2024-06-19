@@ -18,7 +18,7 @@ logger = logging.getLogger('msrest.serialization')
 logger.disabled = True
 
 class InstanceManager(ManagedAuthentication):
-    def __init__(self, resource_group, login: bool = True, user_assigned: str = None, network_profile=None):
+    def __init__(self, resource_group, login: bool = True, user_assigned: dict = {}, network_profile=None):
         if login:
             credential = self.get_credential(Resources.INSTANCE)
             subscription = self.extract_subscription(credential)

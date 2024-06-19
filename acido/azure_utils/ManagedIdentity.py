@@ -2,7 +2,6 @@ import azure.common.credentials
 from azure.identity import AzureCliCredential
 from azure.mgmt.resource import SubscriptionClient
 import azure.identity
-import msrestazure.azure_active_directory
 import os as _os
 import jwt as _jwt
 import getpass
@@ -17,7 +16,7 @@ class ManagedAuthentication:
 
     @property
     def client_id(self) -> str:
-        return _os.getenv("MSI_CLIENT_ID")
+        return _os.getenv("IDENTITY_CLIENT_ID")
 
     def get_credential(self, resource):
         drivers = {
@@ -53,23 +52,10 @@ class ManagedAuthentication:
             return drivers[driver_list][0](resource)
 
     def get_managed_credential(self, resource):
-        if resource in Resources._managed_identity:
-            return self._get_managed_identity_credential()
-        elif Resources._msi.get(resource) is not None:
-            return self._get_msi_credential(
-                Resources._msi.get(resource)
-            )
-        else:
-            raise NotImplementedError(f"Unrecognized resource: {resource}")
+        return self._get_managed_identity_credential()
 
     def _get_managed_identity_credential(self):
         return azure.identity.ManagedIdentityCredential(
-            client_id=self.client_id
-        )
-
-    def _get_msi_credential(self, resource):
-        return msrestazure.azure_active_directory.MSIAuthentication(
-            resource=resource,
             client_id=self.client_id
         )
 
@@ -114,7 +100,7 @@ class ManagedAuthentication:
             return SubscriptionClient(credential).subscriptions.list().next().id.split("/")[2]
         else:
             if credential:
-                obj = _jwt.decode(credential.token['access_token'], verify=False)
+                obj = _jwt.decode(credential.get_token(Resources._msi["blob"]).token, options={"verify_signature": False})
                 return obj['xms_mirid'].split("/")[2]
             else:
                 print(bad('Please run az login to refresh credentials.'))

@@ -4,8 +4,9 @@ import subprocess
 from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
+from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from acido.azure_utils.BlobManager import BlobManager
-from acido.azure_utils.InstanceManager import InstanceManager
+from acido.azure_utils.InstanceManager import InstanceManager, Resources
 from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
 from acido.utils.functions import chunks, jpath, expanduser, split_file
 from huepy import good, bad, info, bold, green, red, orange
@@ -119,7 +120,7 @@ class Acido(object):
         self.image_registry_username = None
         self.image_registry_password = None
         self.storage_account = None
-        self.user_assigned = None
+        self.user_assigned = {}
         self.rg = None
         self.network_profile = None
 
@@ -142,8 +143,9 @@ class Acido(object):
             az_identity_list = json.loads(az_identity_list)
             self.user_assigned = az_identity_list
         except Exception as e:
-            print(bad('Error while trying to get/create user assigned identity.'))
-            self.user_assigned = None
+            if not os.getenv('IDENTITY_CLIENT_ID', None):
+                print(bad('Error while trying to get/create user assigned identity.'))
+
 
         im = InstanceManager(self.rg, login, self.user_assigned, self.network_profile)
         im.login_image_registry(
@@ -153,6 +155,7 @@ class Acido(object):
         )
         self.instance_manager = im
         self.blob_manager = BlobManager(resource_group=self.rg, account_name=self.storage_account)
+        info(f'Using storage account "{self.storage_account}" and storage container "acido"...')
         self.blob_manager.use_container(container_name='acido', create_if_not_exists=True)
         self.all_instances, self.instances_named = self.ls(interactive=False)
 
@@ -323,6 +326,8 @@ class Acido(object):
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
+                    'STORAGE_ACCOUNT_NAME': self.storage_account,
+                    'IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
                         "DefaultEndpointsProtocol=https;"
                         f"AccountName={self.blob_manager.account_name};AccountKey={self.blob_manager.account_key};"
@@ -353,6 +358,8 @@ class Acido(object):
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
+                    'STORAGE_ACCOUNT_NAME': self.storage_account,
+                    'IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
                         "DefaultEndpointsProtocol=https;"
                         f"AccountName={self.blob_manager.account_name};AccountKey={self.blob_manager.account_key};"
@@ -538,6 +545,7 @@ class Acido(object):
         image_registry_username = os.getenv('IMAGE_REGISTRY_USERNAME') if os.getenv('IMAGE_REGISTRY_USERNAME', None) else input(info('Image Registry Username: '))
         image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else input(info('Image Registry Password: '))
         storage_account = os.getenv('STORAGE_ACCOUNT_NAME') if os.getenv('STORAGE_ACCOUNT_NAME', None) else input(info('Storage Account Name to Use: '))
+        
         if not os.getenv('STORAGE_ACCOUNT_NAME', None):
             auth = ManagedAuthentication()
             credential = auth.get_credential(Resources.BLOB)
@@ -565,9 +573,7 @@ class Acido(object):
                 )
             poller.result()
             good('Storage account created.')
-            self.blob_manager = BlobManager(resource_group=self.rg, account_name=self.storage_account)
-            self.blob_manager.use_container(container_name='acido', create_if_not_exists=True)
-            good('Using private storage account blob container "acido".')
+        
         self.selected_instances = []
         self.image_registry_server = image_registry_server
         self.image_registry_username = image_registry_username
