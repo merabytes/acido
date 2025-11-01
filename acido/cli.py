@@ -3,6 +3,7 @@ import json
 import subprocess
 import getpass
 import sys
+import tempfile
 from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
@@ -100,6 +101,10 @@ parser.add_argument("-rwd", "--rm-when-done",
                     dest="rm_when_done",
                     help="Remove the container groups after finish.",
                     action='store_true')
+parser.add_argument("--create",
+                    dest="create_image",
+                    help="Create acido-compatible image from base image (e.g., 'nuclei', 'ubuntu:20.04')",
+                    action='store')
 
 
 args = parser.parse_args()
@@ -596,6 +601,153 @@ class Acido(object):
         self.storage_account = storage_account
         self._save_config()
 
+    def _detect_distro(self, base_image: str) -> dict:
+        """Detect the base OS/distro of the Docker image."""
+        print(info(f'Analyzing base image: {base_image}'))
+        
+        inspect_cmd = f"docker pull {base_image} && docker inspect {base_image}"
+        result = subprocess.run(inspect_cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(bad(f'Failed to pull/inspect image: {result.stderr}'))
+            print(info('Defaulting to Debian-based configuration...'))
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+        
+        # Parse JSON output
+        try:
+            inspect_data = json.loads(result.stdout)[0]
+            
+            # Check for distro indicators in Config.Env or other metadata
+            env_vars = inspect_data.get('Config', {}).get('Env', [])
+            
+            # Default to Debian-based
+            distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            
+            # Detect Alpine
+            for env in env_vars:
+                if 'alpine' in env.lower():
+                    distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
+                    break
+            
+            return distro_info
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            print(bad(f'Failed to parse image metadata: {e}'))
+            print(info('Defaulting to Debian-based configuration...'))
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+
+    def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
+        """Generate Dockerfile content based on distro."""
+        
+        if distro_info['type'] == 'alpine':
+            return f"""FROM {base_image}
+
+RUN apk update && apk add --no-cache python3 py3-pip
+
+RUN python3 -m pip install --break-system-packages acido
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]
+"""
+        else:  # Debian/Ubuntu-based
+            return f"""FROM {base_image}
+
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install acido
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]
+"""
+
+    def create_acido_image(self, base_image: str):
+        """
+        Create an acido-compatible Docker image from a base image.
+        
+        Args:
+            base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04')
+        
+        Returns:
+            str: The new image name if successful, None otherwise
+        """
+        # Validate Docker is available
+        try:
+            result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                print(bad('Docker is not installed or not accessible.'))
+                print(info('Please install Docker and ensure it is in your PATH.'))
+                return None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            print(bad('Docker is not installed or not accessible.'))
+            print(info('Please install Docker and ensure it is in your PATH.'))
+            return None
+        
+        # Determine OS/package manager from base image
+        distro_info = self._detect_distro(base_image)
+        
+        # Generate Dockerfile content
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info)
+        
+        # Create temporary directory and Dockerfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dockerfile_path = os.path.join(tmpdir, 'Dockerfile')
+            with open(dockerfile_path, 'w') as f:
+                f.write(dockerfile_content)
+            
+            # Build the image
+            # Extract image name without registry/tag for naming
+            image_base_name = base_image.split('/')[-1].split(':')[0]
+            new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:latest"
+            
+            print(good(f'Building image: {new_image_name}'))
+            print(info(f'Using distro type: {distro_info["type"]}'))
+            
+            build_cmd = f"docker build -t {new_image_name} {tmpdir}"
+            result = subprocess.run(build_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(bad(f'Failed to build image:'))
+                print(result.stderr)
+                return None
+            
+            # Show build output
+            if result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        print(f'  {line}')
+            
+            print(good(f'Successfully built {new_image_name}'))
+            
+            # Login to registry
+            print(info(f'Logging in to registry...'))
+            login_cmd = f"docker login {self.image_registry_server} -u {self.image_registry_username} -p {self.image_registry_password}"
+            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(bad(f'Failed to login to registry:'))
+                print(result.stderr)
+                return None
+            
+            # Push to registry
+            print(info(f'Pushing to registry...'))
+            push_cmd = f"docker push {new_image_name}"
+            result = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(bad(f'Failed to push image:'))
+                print(result.stderr)
+                return None
+            
+            # Show push output
+            if result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        print(f'  {line}')
+            
+            print(good(f'Successfully pushed {new_image_name}'))
+            print(info(f'You can now use this image with: acido -f myfleet -im {new_image_name} ...'))
+            
+            return new_image_name
+
 def main():
     """Main entry point for the acido CLI."""
     # Check if user is just asking for help - no config needed
@@ -657,6 +809,8 @@ def main():
         )
     if args.remove:
         acido.rm(args.remove)
+    if args.create_image:
+        acido.create_acido_image(args.create_image)
 
 if __name__ == "__main__":
     main()
