@@ -1,4 +1,5 @@
-from huepy import *
+from huepy import good, bad, info, warn, run, que, goodrun, bold, underline
+
 import time
 import subprocess
 import os

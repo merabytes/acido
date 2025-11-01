@@ -1,10 +1,15 @@
-from azure.identity import AzureCliCredential
+from azure.identity import (
+    AzureCliCredential,
+    ManagedIdentityCredential,
+    EnvironmentCredential,
+    ClientSecretCredential
+)
 from azure.mgmt.resource import SubscriptionClient
 import azure.identity
 import os as _os
 import jwt as _jwt
 import getpass
-from huepy import *
+from huepy import bad
 import sys
 import traceback
 import logging
@@ -14,6 +19,10 @@ logging.getLogger('azure.identity').setLevel(logging.ERROR)
 
 __author__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
+
+def _as_scope(url: str) -> str:
+    # turn "https://storage.azure.com/" into "https://storage.azure.com/.default"
+    return url.rstrip("/") + "/.default"
 
 class ManagedAuthentication:
 
@@ -99,16 +108,69 @@ class ManagedAuthentication:
         return force or auto
 
     def extract_subscription(self, credential):
+        # Always show what type we received, per your note
+        print(type(credential))
+
+        # 1) Azure CLI: list subscriptions directly
         if isinstance(credential, AzureCliCredential):
-            return SubscriptionClient(credential).subscriptions.list().next().id.split("/")[2]
-        else:
-            if credential:
-                print(type(credential))
-                obj = _jwt.decode(credential.get_token(Resources._msi["blob"]).token, options={"verify_signature": False})
-                return obj['xms_mirid'].split("/")[2]
-            else:
-                print(bad('Please run az login to refresh credentials.'))
-                sys.exit()
+            try:
+                subs = SubscriptionClient(credential).subscriptions.list()
+                first = next(iter(subs))
+                # `subscription_id` is already the GUID you want
+                return first.subscription_id
+            except StopIteration:
+                print(bad("No subscriptions found for the current Azure CLI context."))
+                sys.exit(1)
+
+        # Helper: try ARM list using whatever credential we have
+        def try_arm_list():
+            try:
+                subs = SubscriptionClient(credential).subscriptions.list()
+                first = next(iter(subs))
+                return first.subscription_id
+            except Exception:
+                return None
+
+        # 2) Managed Identity: first try ARM list; if not allowed, decode xms_mirid
+        if isinstance(credential, ManagedIdentityCredential):
+            sub_id = try_arm_list()
+            if sub_id:
+                return sub_id
+            # Fallback: get a token (blob scope is fine—now correctly formed) and read xms_mirid
+            token = credential.get_token(_as_scope(Resources._msi["blob"])).token
+            obj = _jwt.decode(token, options={"verify_signature": False})
+            mirid = obj.get("xms_mirid")
+            if mirid:
+                return mirid.split("/")[2]
+            # As a second fallback, try ARM scope for the same trick
+            token = credential.get_token(_as_scope(Resources._msi["instance"])).token
+            obj = _jwt.decode(token, options={"verify_signature": False})
+            mirid = obj.get("xms_mirid")
+            if mirid:
+                return mirid.split("/")[2]
+            print(bad("Could not determine subscription id from Managed Identity token."))
+            sys.exit(1)
+
+        # 3) Environment / ClientSecret / other credentials:
+        # Prefer ARM list; if not permitted, try decoding xms_mirid from an ARM-scoped token.
+        if isinstance(credential, (EnvironmentCredential, ClientSecretCredential)) or credential:
+            sub_id = try_arm_list()
+            if sub_id:
+                return sub_id
+            try:
+                token = credential.get_token(_as_scope(Resources._msi["instance"])).token
+                obj = _jwt.decode(token, options={"verify_signature": False})
+                mirid = obj.get("xms_mirid")
+                if mirid:
+                    return mirid.split("/")[2]
+            except Exception:
+                pass
+            print(bad("Unable to resolve subscription id. Ensure the credential has ARM access or run az login."))
+            sys.exit(1)
+
+        # 4) No credential available
+        print(bad("Please run az login or provide valid credentials."))
+        sys.exit(1)
 
 
 class Resources:
