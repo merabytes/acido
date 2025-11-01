@@ -6,7 +6,7 @@ from azure.mgmt.containerinstance.models import (
     ResourceRequests, OperatingSystemTypes, EnvironmentVariable,
     ResourceIdentityType)
 from azure.mgmt.containerinstance.models import ContainerGroupIdentity, UserAssignedIdentities
-from msrestazure.azure_exceptions import CloudError
+from azure.core.exceptions import HttpResponseError
 from huepy import *
 from shlex import quote
 import logging
@@ -172,9 +172,9 @@ class InstanceManager(ManagedAuthentication):
             ok = True
             for i_num in range(1, instance_number + 1):
                 results[f'{name}-{i_num:02d}'] = ok
-        except CloudError as e:
+        except HttpResponseError as e:
             ok = False
-            print(bad(e.message))
+            print(bad(str(e)))
             raise e
 
         self.env_vars.clear()
@@ -197,11 +197,11 @@ class InstanceManager(ManagedAuthentication):
                 resource_group_name=self.resource_group,
                 container_group_name=group_name
             )
-        except CloudError as e:
+        except HttpResponseError as e:
             if e.status_code == 404:
                 return False
             else:
-                print(bad(e.message))
+                print(bad(str(e)))
         return cg
 
     def ls(self):
@@ -209,8 +209,8 @@ class InstanceManager(ManagedAuthentication):
             cg = self._client.container_groups.list_by_resource_group(
                 resource_group_name=self.resource_group,
             )
-        except CloudError as e:
-            print(bad(e.message))
+        except HttpResponseError as e:
+            print(bad(str(e)))
             return []
         return cg
 
@@ -220,7 +220,7 @@ class InstanceManager(ManagedAuthentication):
                 resource_group_name=self.resource_group,
                 container_group_name=group_name
             )
-        except CloudError as e:
+        except HttpResponseError as e:
             if e.status_code == 404:
                 return False
             else:
@@ -234,7 +234,7 @@ class InstanceManager(ManagedAuthentication):
                 resource_group_name=self.resource_group,
                 container_group_name=group_name
             )
-        except CloudError as e:
+        except HttpResponseError as e:
             print(str(e))
             return False
         return True
@@ -245,7 +245,7 @@ class InstanceManager(ManagedAuthentication):
                 resource_group_name=self.resource_group,
                 container_group_name=group_name
             )
-        except CloudError as e:
+        except HttpResponseError as e:
             if e.status_code == 404:
                 return False
             else:

@@ -1,4 +1,3 @@
-import azure.common.credentials
 from azure.identity import AzureCliCredential
 from azure.mgmt.resource import SubscriptionClient
 import azure.identity
@@ -96,7 +95,7 @@ class ManagedAuthentication:
         return force or auto
 
     def extract_subscription(self, credential):
-        if isinstance(credential, azure.identity._credentials.azure_cli.AzureCliCredential):
+        if isinstance(credential, AzureCliCredential):
             return SubscriptionClient(credential).subscriptions.list().next().id.split("/")[2]
         else:
             if credential:
