@@ -73,11 +73,6 @@ paypal.com
 acido create nmap
 ```
 
-Or using the alternative syntax:
-```bash
-acido --create nmap
-```
-
 3. Run distributed scan:
 ```bash
 acido -f nmap-scan \
