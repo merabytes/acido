@@ -194,13 +194,15 @@ class Acido(object):
                 return
         
 
-        try:
-            az_identity_list = subprocess.check_output(f'az identity create --resource-group {self.rg} --name acido', shell=True)
-            az_identity_list = json.loads(az_identity_list)
-            self.user_assigned = az_identity_list
-        except Exception as e:
-            if not os.getenv('IDENTITY_CLIENT_ID', None):
+        # Only try to create identity via Azure CLI if IDENTITY_CLIENT_ID is not already set
+        if not os.getenv('IDENTITY_CLIENT_ID', None):
+            try:
+                az_identity_list = subprocess.check_output(f'az identity create --resource-group {self.rg} --name acido', shell=True)
+                az_identity_list = json.loads(az_identity_list)
+                self.user_assigned = az_identity_list
+            except Exception as e:
                 print(bad('Error while trying to get/create user assigned identity.'))
+                print(info('Continuing without user-assigned identity. Some features may not work.'))
 
 
         im = InstanceManager(self.rg, login, self.user_assigned, self.network_profile)

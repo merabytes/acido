@@ -24,8 +24,8 @@ class ManagedAuthentication:
                 self.get_environment_credential
             ],
             "local": [
-                self.get_cli_credential,
                 self.get_environment_credential,
+                self.get_cli_credential,
                 self.get_client_secret_credential
             ]
         }
