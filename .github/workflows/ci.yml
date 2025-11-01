@@ -1,10 +1,13 @@
 name: CI Tests
 
 on:
-  pull_request:
-    branches: [ main, master ]
   push:
-    branches: [ main, master ]
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 env:
   # Azure credentials - required for full integration tests
