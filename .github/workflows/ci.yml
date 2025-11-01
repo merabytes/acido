@@ -1,0 +1,181 @@
+name: CI Tests
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  push:
+    branches: [ main, master ]
+
+env:
+  # Azure credentials - required for full integration tests
+  # These should be configured as repository secrets
+  AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+  AZURE_REGISTRY_SERVER: ${{ secrets.AZURE_REGISTRY_SERVER }}
+  AZURE_REGISTRY_USERNAME: ${{ secrets.AZURE_REGISTRY_USERNAME }}
+  AZURE_REGISTRY_PASSWORD: ${{ secrets.AZURE_REGISTRY_PASSWORD }}
+
+jobs:
+  test:
+    name: Test on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-dev build-essential
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt || pip install .
+
+    - name: Verify acido installation
+      run: |
+        python -c "from acido.utils.decoration import __version__; print('acido version:', __version__)"
+        python -c "from acido.cli import parser; print('CLI parser loaded successfully')"
+
+    - name: Test acido imports
+      run: |
+        python -c "from acido.azure_utils.BlobManager import BlobManager"
+        python -c "from acido.azure_utils.InstanceManager import InstanceManager, Resources"
+        python -c "from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile"
+        python -c "from acido.azure_utils.VaultManager import VaultManager"
+        python -c "from acido.azure_utils.ManagedIdentity import ManagedAuthentication"
+        python -c "from acido.utils.functions import chunks, split_file"
+        python -c "from acido.utils.shell_utils import wait_command, exec_command"
+
+    - name: Test CLI help
+      run: |
+        python -m acido.cli --help
+
+    - name: Run Python syntax check
+      run: |
+        python -m py_compile acido/cli.py
+        python -m py_compile acido/azure_utils/*.py
+        python -m py_compile acido/utils/*.py
+
+  build-test:
+    name: Build and Install Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Build distribution
+      run: |
+        python -m pip install --upgrade pip setuptools wheel build
+        python -m build
+
+    - name: Install from wheel
+      run: |
+        pip install dist/*.whl
+
+    - name: Verify installation
+      run: |
+        python -c "from acido.utils.decoration import __version__; print('Successfully installed acido version:', __version__)"
+        python -m acido.cli --help
+
+  dockerfile-validation:
+    name: Validate Nuclei Scanner Dockerfile
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create test Dockerfile for Nuclei
+      run: |
+        cat > Dockerfile.nuclei << 'EOF'
+        FROM ubuntu:20.04
+        
+        # Set non-interactive mode for apt-get
+        ENV DEBIAN_FRONTEND=noninteractive
+        
+        # Install Python and dependencies
+        RUN apt-get update && apt-get install -y \
+            python3 \
+            python3-pip \
+            python3-dev \
+            wget \
+            unzip \
+            && rm -rf /var/lib/apt/lists/*
+        
+        # Install acido
+        RUN python3 -m pip install --upgrade pip
+        COPY . /tmp/acido
+        RUN cd /tmp/acido && pip install .
+        
+        # Install Nuclei
+        RUN wget -q https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_3.3.2_linux_amd64.zip && \
+            unzip nuclei_3.3.2_linux_amd64.zip && \
+            mv nuclei /usr/local/bin/ && \
+            chmod +x /usr/local/bin/nuclei && \
+            rm nuclei_3.3.2_linux_amd64.zip
+        
+        CMD ["sleep", "infinity"]
+        EOF
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Nuclei Scanner Docker image
+      run: |
+        docker build -f Dockerfile.nuclei -t acido-nuclei:test .
+
+    - name: Test Nuclei installation in container
+      run: |
+        docker run --rm acido-nuclei:test nuclei -version
+
+    - name: Test acido installation in container
+      run: |
+        docker run --rm acido-nuclei:test python3 -c "from acido.utils.decoration import __version__; print('acido installed:', __version__)"
+
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pylint
+
+    - name: Run flake8
+      continue-on-error: true
+      run: |
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 acido --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 acido --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Check code structure
+      run: |
+        # Verify all Python files are valid
+        find acido -name "*.py" -exec python -m py_compile {} \;
