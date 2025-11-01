@@ -2,7 +2,7 @@
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
-This tool is inspired by [axiom](https://github.com/pry0cc/axiom) where you can just spin up hundreds of instances to perform a distributed nmap/ffuf/screenshotting scan, and then delete them after they have finished. 
+This tool is inspired by [axiom](https://github.com/pry0cc/axiom) where you can just spin up hundreds of instances to perform a distributed nmap/nuclei/screenshotting scan, and then delete them after they have finished. 
 
 Depending on your quota limit you may need to open a ticket to Azure to request container group limits increase.
 
@@ -317,9 +317,9 @@ The architecture is designed to be **tool-agnostic**, making it easy to support 
           │               │               │                │
           ▼               ▼               ▼                ▼
     ┌─────────┐     ┌─────────┐    ┌──────────┐    ┌──────────┐
-    │  nmap   │     │ nuclei  │    │   ffuf   │    │  masscan │
+    │  nmap   │     │ nuclei  │    │ masscan  │    │ nikto    │
     │         │     │         │    │          │    │          │
-    │ -iL     │     │ -list   │    │ -w       │    │ -iL      │
+    │ -iL     │     │ -list   │    │ -iL      │    │ -h       │
     │ input   │     │ input   │    │ input    │    │ input    │
     └─────────┘     └─────────┘    └──────────┘    └──────────┘
 ```
@@ -342,9 +342,9 @@ acido -f nmap-fleet -n 20 -im registry.io/nmap:latest \
 acido -f nuclei-fleet -n 50 -im registry.io/nuclei:latest \
   -t 'nuclei -list input -t /nuclei-templates/' -i urls.txt
 
-# FFUF scan
-acido -f ffuf-fleet -n 30 -im registry.io/ffuf:latest \
-  -t 'ffuf -w input -u https://target.com/FUZZ' -i wordlist.txt
+# Masscan scan
+acido -f masscan-fleet -n 30 -im registry.io/masscan:latest \
+  -t 'masscan -iL input -p0-65535' -i targets.txt
 ```
 
 ### Data Flow Summary
@@ -416,6 +416,84 @@ acido -f ffuf-fleet -n 30 -im registry.io/ffuf:latest \
   - `create_virtual_network()`: Sets up VNets
   - `create_network_profile()`: Creates network profiles for ACIs
 - **Use Case**: Route all container traffic through a single public IP
+
+### Traffic Routing for Security Audits
+
+Acido supports routing all container traffic through a single public IPv4 address, which is particularly valuable for security audits and penetration testing engagements:
+
+#### How It Works
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Single Public IP (e.g., 20.123.45.67)                         │
+│  Created with: acido --create-ip my-pentest-ip                 │
+└────────────────┬───────────────────────────────────────────────┘
+                 │ All outbound traffic routes through this IP
+                 │
+    ┌────────────┼────────────┬────────────┬────────────┐
+    │            │            │            │            │
+    ▼            ▼            ▼            ▼            ▼
+┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌─────────┐
+│Container│ │Container│ │Container│ │Container│ │Container│
+│   1     │ │   2     │ │   3     │ │  ...    │ │   50    │
+└─────────┘ └─────────┘ └─────────┘ └─────────┘ └─────────┘
+    │            │            │            │            │
+    └────────────┴────────────┴────────────┴────────────┘
+                             │
+                   Distributed scanning
+                             ▼
+                    ┌─────────────────┐
+                    │  Target Network │
+                    │  (Client site)  │
+                    └─────────────────┘
+```
+
+#### Benefits for Penetration Testing
+
+1. **Simplified IP Whitelisting**: 
+   - Instead of whitelisting dozens or hundreds of container IPs, security teams only need to whitelist a single IP address
+   - Reduces firewall rule complexity and management overhead
+   - Makes it easier to coordinate with client security teams
+
+2. **Larger Scale Testing**:
+   - Deploy 50, 100, or more containers for distributed scanning
+   - All traffic appears to originate from the whitelisted IP
+   - Achieve significantly higher throughput than traditional single-machine scans
+   - Complete comprehensive scans in a fraction of the time
+
+3. **Audit Trail and Compliance**:
+   - All scan traffic is associated with a single, documented IP address
+   - Easier to track and correlate security testing activities
+   - Simplifies incident response if alerts are triggered
+   - Meets compliance requirements for authorized testing
+
+4. **Professional Engagement Workflow**:
+   - Create IP before engagement: `acido --create-ip client-pentest-2024`
+   - Provide IP to client for whitelisting
+   - Deploy fleet with IP routing: `acido -f scan-fleet -n 50 --ip -t '...'`
+   - All containers automatically use the whitelisted IP
+   - Clean up after engagement
+
+**Example Usage:**
+
+```bash
+# Create a new public IP for the pentest engagement
+acido --create-ip acme-corp-pentest
+
+# Provide the IP address (shown in output) to client for whitelisting
+# Example: 20.123.45.67
+
+# Once whitelisted, deploy your fleet routing through this IP
+acido -f nmap-fleet -n 50 --ip \
+  -im registry.io/nmap:latest \
+  -t 'nmap -iL input -p- -T4' \
+  -i targets.txt
+
+# All 50 containers will scan through the single whitelisted IP
+# Achieving 50x parallelization while maintaining a single source IP
+```
+
+This approach combines the **scale and speed** of distributed scanning with the **simplicity and control** required for professional security engagements.
 
 # Upcoming features
 
