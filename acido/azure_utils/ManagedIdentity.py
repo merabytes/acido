@@ -103,6 +103,7 @@ class ManagedAuthentication:
             return SubscriptionClient(credential).subscriptions.list().next().id.split("/")[2]
         else:
             if credential:
+                print(type(credential))
                 obj = _jwt.decode(credential.get_token(Resources._msi["blob"]).token, options={"verify_signature": False})
                 return obj['xms_mirid'].split("/")[2]
             else:
