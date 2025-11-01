@@ -3,7 +3,8 @@ from uuid import uuid4 as uuid
 from azure.core.exceptions import ResourceNotFoundError
 from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
-from huepy import good, bad, info, warn, run, que, goodrun, bold, underline
+from huepy import good, bad, info
+
 
 import os
 
