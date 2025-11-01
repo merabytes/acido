@@ -158,6 +158,15 @@ class Acido(object):
             self.setup()
             return
         
+        # Check if environment variables are set for auto-configuration
+        env_config_available = all([
+            os.getenv('AZURE_RESOURCE_GROUP'),
+            os.getenv('IMAGE_REGISTRY_SERVER'),
+            os.getenv('IMAGE_REGISTRY_USERNAME'),
+            os.getenv('IMAGE_REGISTRY_PASSWORD'),
+            os.getenv('STORAGE_ACCOUNT_NAME')
+        ])
+        
         # Try to load config
         config_exists = False
         try:
@@ -165,7 +174,17 @@ class Acido(object):
             config_exists = True
         except FileNotFoundError:
             # No config file exists
-            if check_config:
+            if env_config_available:
+                # Auto-configure from environment variables
+                self.rg = os.getenv('AZURE_RESOURCE_GROUP')
+                self.image_registry_server = os.getenv('IMAGE_REGISTRY_SERVER')
+                self.image_registry_username = os.getenv('IMAGE_REGISTRY_USERNAME')
+                self.image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD')
+                self.storage_account = os.getenv('STORAGE_ACCOUNT_NAME')
+                self.selected_instances = []
+                config_exists = True
+                info('Auto-configured from environment variables.')
+            elif check_config:
                 # If user is trying to run a command that requires config, prompt them
                 print(bad('No configuration found.'))
                 print(info('Please run "acido -c" to configure acido first, or use "acido -h" for help.'))
@@ -615,9 +634,9 @@ class Acido(object):
         return outputs
 
     def setup(self):
-        rg = os.getenv('RG') if os.getenv('RG', None) else input(info('Please provide a Resource Group Name to deploy the ACIs: '))
+        rg = os.getenv('AZURE_RESOURCE_GROUP') if os.getenv('AZURE_RESOURCE_GROUP', None) else input(info('Please provide a Resource Group Name to deploy the ACIs: '))
         self.rg = rg
-        image_registry_server = os.getenv('IMAGE_REGISTRY_SERVER') if os.getenv('RG', None) else input(info('Image Registry Server: '))
+        image_registry_server = os.getenv('IMAGE_REGISTRY_SERVER') if os.getenv('IMAGE_REGISTRY_SERVER', None) else input(info('Image Registry Server: '))
         image_registry_username = os.getenv('IMAGE_REGISTRY_USERNAME') if os.getenv('IMAGE_REGISTRY_USERNAME', None) else input(info('Image Registry Username: '))
         image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else getpass.getpass(info('Image Registry Password: '))
         storage_account = os.getenv('STORAGE_ACCOUNT_NAME') if os.getenv('STORAGE_ACCOUNT_NAME', None) else input(info('Storage Account Name to Use: '))
