@@ -864,8 +864,10 @@ class Acido(object):
         if distro_info['type'] == 'alpine':
             return f"""FROM {base_image}
 
-RUN apk update && apk add --no-cache python3 py3-pip
+# Install Python and build dependencies required for psutil and other native extensions
+RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers
 
+# Install acido (psutil will build from source)
 RUN python3 -m pip install --break-system-packages acido
 
 ENTRYPOINT []
@@ -878,8 +880,10 @@ CMD ["sleep", "infinity"]
                 pkg_manager = 'yum'  # Default to yum if invalid
             return f"""FROM {base_image}
 
-RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip && {pkg_manager} clean all
+# Install Python and build dependencies required for psutil and other native extensions
+RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all
 
+# Install acido (psutil will build from source)
 RUN python3 -m pip install acido
 
 ENTRYPOINT []
@@ -888,8 +892,10 @@ CMD ["sleep", "infinity"]
         else:  # Debian/Ubuntu-based
             return f"""FROM {base_image}
 
-RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+# Install Python and build dependencies required for psutil and other native extensions
+RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 
+# Install acido (psutil will build from source)
 RUN python3 -m pip install acido
 
 ENTRYPOINT []
