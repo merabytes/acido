@@ -726,22 +726,61 @@ class Acido(object):
         # Short name without tag - build full URL
         return f"{self.image_registry_server}/{image_name}:{tag}"
 
+    def _validate_image_name(self, image_name: str) -> bool:
+        """
+        Validate Docker image name to prevent command injection.
+        
+        Valid Docker image names can contain:
+        - Lowercase letters, digits, and separators (period, underscore, hyphen)
+        - Optional registry hostname/port
+        - Optional tag after colon
+        - Optional digest after @
+        
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        # Docker image name pattern (simplified but secure)
+        # Allows: registry.io:5000/namespace/image:tag or image:tag
+        pattern = r'^[a-zA-Z0-9][a-zA-Z0-9._\-/:@]*[a-zA-Z0-9]$'
+        
+        if not re.match(pattern, image_name):
+            return False
+        
+        # Additional check: no shell metacharacters
+        dangerous_chars = ['$', '`', ';', '&', '|', '>', '<', '(', ')', '{', '}', '[', ']', '\\', '"', "'", '\n', '\r']
+        for char in dangerous_chars:
+            if char in image_name:
+                return False
+        
+        return True
+
     def _detect_distro(self, base_image: str) -> dict:
         """Detect the base OS/distro of the Docker image by running it and checking package managers."""
         print(info(f'Analyzing base image: {base_image}'))
         
+        # Validate image name to prevent command injection
+        if not self._validate_image_name(base_image):
+            print(bad(f'Invalid Docker image name: {base_image}'))
+            print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
+            print(info('Defaulting to Debian-based configuration...'))
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+        
         # Login to Docker Hub if credentials are available (for private images or rate limiting)
         if self.docker_username and self.docker_password:
             print(info('Logging in to Docker Hub...'))
-            login_cmd = f"docker login -u {self.docker_username} -p {self.docker_password}"
-            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            # Use subprocess.run with list to avoid shell injection
+            result = subprocess.run(
+                ['docker', 'login', '-u', self.docker_username, '--password-stdin'],
+                input=self.docker_password.encode(),
+                capture_output=True,
+                text=False
+            )
             if result.returncode != 0:
-                print(bad(f'Warning: Failed to login to Docker Hub: {result.stderr}'))
+                print(bad(f'Warning: Failed to login to Docker Hub'))
                 print(info('Continuing without Docker Hub authentication...'))
         
         # Pull the image first
-        pull_cmd = f"docker pull {base_image}"
-        result = subprocess.run(pull_cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(['docker', 'pull', base_image], capture_output=True, text=True)
         
         if result.returncode != 0:
             print(bad(f'Failed to pull image: {result.stderr}'))
@@ -750,8 +789,11 @@ class Acido(object):
         
         # Method 1: Check /etc/os-release for distro information
         print(info('Detecting distro by checking OS release info...'))
-        os_release_cmd = f"docker run --rm --entrypoint '' {base_image} sh -c 'cat /etc/os-release 2>/dev/null || cat /etc/alpine-release 2>/dev/null || echo unknown'"
-        result = subprocess.run(os_release_cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
+             'cat /etc/os-release 2>/dev/null || cat /etc/alpine-release 2>/dev/null || echo unknown'],
+            capture_output=True, text=True
+        )
         
         if result.returncode == 0 and result.stdout:
             os_info = result.stdout.lower()
@@ -771,16 +813,20 @@ class Acido(object):
                 print(good('Detected RHEL/CentOS/Fedora'))
                 # Check if dnf or yum is available
                 pkg_check = subprocess.run(
-                    f"docker run --rm --entrypoint '' {base_image} sh -c 'which dnf 2>/dev/null || which yum 2>/dev/null'",
-                    shell=True, capture_output=True, text=True
+                    ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
+                     'which dnf 2>/dev/null || which yum 2>/dev/null'],
+                    capture_output=True, text=True
                 )
                 pkg_manager = 'dnf' if 'dnf' in pkg_check.stdout else 'yum'
                 return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': pkg_manager}
         
         # Method 2: Check which package managers are available
         print(info('Detecting distro by checking available package managers...'))
-        pkg_check_cmd = f"docker run --rm --entrypoint '' {base_image} sh -c 'which apk apt-get yum dnf 2>/dev/null || true'"
-        result = subprocess.run(pkg_check_cmd, shell=True, capture_output=True, text=True)
+        result = subprocess.run(
+            ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
+             'which apk apt-get yum dnf 2>/dev/null || true'],
+            capture_output=True, text=True
+        )
         
         if result.returncode == 0 and result.stdout:
             pkg_managers = result.stdout.strip()
@@ -860,6 +906,12 @@ CMD ["sleep", "infinity"]
             print(info('Please install Docker and ensure it is in your PATH.'))
             return None
         
+        # Validate image name before using it
+        if not self._validate_image_name(base_image):
+            print(bad(f'Invalid Docker image name: {base_image}'))
+            print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
+            return None
+        
         # Determine OS/package manager from base image
         distro_info = self._detect_distro(base_image)
         
@@ -877,11 +929,18 @@ CMD ["sleep", "infinity"]
             image_base_name = base_image.split('/')[-1].split(':')[0]
             new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:latest"
             
+            # Validate new image name too
+            if not self._validate_image_name(new_image_name):
+                print(bad(f'Generated invalid image name: {new_image_name}'))
+                return None
+            
             print(good(f'Building image: {new_image_name}'))
             print(info(f'Using distro type: {distro_info["type"]}'))
             
-            build_cmd = f"docker build -t {new_image_name} {tmpdir}"
-            result = subprocess.run(build_cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                ['docker', 'build', '-t', new_image_name, tmpdir],
+                capture_output=True, text=True
+            )
             
             if result.returncode != 0:
                 print(bad(f'Failed to build image:'))
@@ -898,18 +957,24 @@ CMD ["sleep", "infinity"]
             
             # Login to registry
             print(info(f'Logging in to registry...'))
-            login_cmd = f"docker login {self.image_registry_server} -u {self.image_registry_username} -p {self.image_registry_password}"
-            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                ['docker', 'login', self.image_registry_server, '-u', self.image_registry_username, 
+                 '--password-stdin'],
+                input=self.image_registry_password.encode(),
+                capture_output=True,
+                text=False
+            )
             
             if result.returncode != 0:
-                print(bad(f'Failed to login to registry:'))
-                print(result.stderr)
+                print(bad(f'Failed to login to registry'))
                 return None
             
             # Push to registry
             print(info(f'Pushing to registry...'))
-            push_cmd = f"docker push {new_image_name}"
-            result = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                ['docker', 'push', new_image_name],
+                capture_output=True, text=True
+            )
             
             if result.returncode != 0:
                 print(bad(f'Failed to push image:'))
