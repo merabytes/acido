@@ -24,8 +24,8 @@ class ManagedAuthentication:
     def get_credential(self, resource):
         drivers = {
             "cloud": [
-                self.get_managed_credential,
-                self.get_environment_credential
+                self.get_environment_credential,
+                self.get_managed_credential
             ],
             "local": [
                 self.get_environment_credential,

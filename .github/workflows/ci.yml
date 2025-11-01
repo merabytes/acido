@@ -102,7 +102,7 @@ jobs:
         python -m acido.cli --help
 
   acido-create-test:
-    name: Test acido --create nuclei
+    name: Test acido create nuclei
     runs-on: ubuntu-latest
     
     steps:
@@ -119,7 +119,7 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install .
 
-    - name: Test acido --create nuclei
+    - name: Test acido create nuclei
       env:
         AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -132,7 +132,7 @@ jobs:
       run: |
         # This will test that acido can create a nuclei image
         # It will use environment variables for configuration
-        acido --create nuclei || echo "Note: Image creation may fail without proper credentials, but command should execute"
+        acido create nuclei || echo "Note: Image creation may fail without proper credentials, but command should execute"
 
   lint:
     name: Code Quality Checks
