@@ -1,4 +1,4 @@
-# acido (0.18)
+# acido (0.19)
 
 **The distributed security scanning framework built for speed and scale.**
 
@@ -11,6 +11,9 @@
   - [Works with Your Favorite Tools](#works-with-your-favorite-tools)
   - [How It Works](#how-it-works)
   - [Open Source + Enterprise](#open-source--enterprise)
+- [Get Started](#get-started)
+  - [Prerequisites](#prerequisites)
+  - [Step-by-Step Tutorial](#step-by-step-tutorial)
 - [CLI Reference](#cli-reference)
 - [Quick Start Example: Distributed Nmap Scanning](#quick-start-example-distributed-nmap-scanning)
 - [More Real-World Examples](#more-real-world-examples)
@@ -84,6 +87,149 @@ Acido supports any security tool that can be containerized:
 Inspired by [axiom](https://github.com/pry0cc/axiom), acido brings distributed security scanning to Azure with enterprise-grade security features and seamless cloud integration.
 
 **Note**: Depending on your Azure quota limits, you may need to request container group limit increases through Azure support.
+
+## Get Started
+
+Ready to run your first distributed scan? Here's a complete walkthrough from zero to scanning in 5 minutes:
+
+### Prerequisites
+- Python 3.7+ installed
+- Docker installed and running
+- An Azure account (free tier works!)
+
+### Step-by-Step Tutorial
+
+#### 1. Prepare Your Target List
+Create a file with your targets (one per line):
+```bash
+cat targets.txt
+```
+```
+facebook.com
+uber.com
+paypal.com
+```
+
+#### 2. Install Acido
+```bash
+pip install acido
+```
+This installs the acido CLI tool globally on your system.
+
+#### 3. Authenticate with Azure
+```bash
+az login
+```
+This opens your browser to sign in to your Azure account. Acido needs this to create and manage container instances.
+
+#### 4. Configure Acido
+```bash
+acido -c
+```
+This interactive setup asks for:
+- **Resource Group Name**: Where Azure resources will be created (e.g., `MySecurityScans`)
+- **Image Registry Server**: Your Azure Container Registry URL (e.g., `myregistry.azurecr.io`)
+- **Registry Username**: Username for your container registry
+- **Registry Password**: Password (hidden with `*****` for security)
+- **Storage Account Name**: For storing scan inputs/outputs (e.g., `mystorage`)
+
+💡 *This only needs to be done once. Config is saved locally.*
+
+#### 5. Create Your Scanning Image
+```bash
+acido --create nmap
+```
+This automatically:
+- Pulls the `nmap` base image
+- Installs Python3 and acido inside it
+- Configures it for distributed scanning
+- Pushes it to your Azure Container Registry
+
+Output: `myregistry.azurecr.io/nmap-acido:latest`
+
+#### 6. Run Your Distributed Scan
+```bash
+acido -f nmap \
+    -n 3 \
+    --image nmap \
+    -t 'nmap -iL input -p 0-200' \
+    -i targets.txt \
+    -o output \
+    --rm-when-done
+```
+
+Let's break down what each parameter does:
+- `-f nmap` → Fleet name (organizing label for your containers)
+- `-n 3` → Deploy 3 container instances (parallelization level)
+- `--image nmap` → Use the `nmap` image (acido auto-adds registry URL)
+- `-t 'nmap -iL input -p 0-200'` → Command to run (scans ports 0-200)
+- `-i targets.txt` → Input file (automatically split across 3 containers)
+- `-o output` → Save results to `output.json` and `all_output.txt`
+- `--rm-when-done` → Auto-delete containers after completion
+
+**What happens next:**
+1. ✅ Acido splits `targets.txt` into 3 chunks (1 target per container)
+2. ✅ Deploys 3 Azure Container Instances simultaneously
+3. ✅ Each container scans its assigned target(s) independently
+4. ✅ Results are collected and merged automatically
+5. ✅ Containers are destroyed (cost savings!)
+
+**Scan in progress...**
+```
+[+] Uploaded 3 target lists.
+[+] Successfully created new group/s: [ nmap-01 ]
+[+] Successfully created new instance/s: [ nmap-01-01 nmap-01-02 nmap-01-03 ]
+[+] Waiting 1 minute until the container/s group/s gets provisioned...
+[+] Waiting for outputs...
+[+] Executed command on nmap-01-01. Output: [...]
+[+] Executed command on nmap-01-02. Output: [...]
+[+] Executed command on nmap-01-03. Output: [...]
+[+] Saved container outputs at: output.json
+[+] Saved merged outputs at: all_output.txt
+```
+
+#### 7. View Your Results
+```bash
+cat all_output.txt
+```
+
+You'll see the combined nmap scan results from all 3 containers!
+
+---
+
+### What You Just Accomplished
+
+🎉 You just ran a **distributed security scan** across 3 Azure containers in parallel!
+
+**Key Takeaways:**
+- **3x Faster**: 3 targets scanned simultaneously instead of sequentially
+- **Cloud-Powered**: No local resources used—everything ran in Azure
+- **Cost-Effective**: Only paid for ~2-3 minutes of container runtime
+- **Automatic**: Target splitting, deployment, and result collection all handled automatically
+- **Scalable**: Change `-n 3` to `-n 50` for 50x parallelization!
+
+### Next Steps
+
+**Scale up your scanning:**
+```bash
+# Scan 100 targets with 50 containers
+acido -f big-scan -n 50 --image nmap -t 'nmap -iL input -p-' -i targets.txt -o results
+```
+
+**Try other tools:**
+```bash
+# Create a Nuclei image for vulnerability scanning
+acido --create nuclei
+
+# Run distributed vulnerability scan
+acido -f vuln-scan -n 20 --image nuclei -t 'nuclei -list input' -i urls.txt -o vulns
+```
+
+**Use different versions:**
+```bash
+# Create custom tagged images
+acido -f scan --image nmap --tag v7.94 -t 'nmap -iL input' -i targets.txt
+```
 
 ## CLI Reference
 

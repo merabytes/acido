@@ -1,6 +1,9 @@
 import argparse
 import json
 import subprocess
+import getpass
+import sys
+import tempfile
 from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
@@ -33,9 +36,14 @@ parser.add_argument("-f", "--fleet",
                     action='store')
 parser.add_argument("-im", "--image",
                     dest="image_name",
-                    help="Deploy an specific image.",
+                    help="Image name (e.g., 'nmap', 'nuclei') or full URL. Registry from config will be prepended if not a full URL.",
                     action='store',
-                    default='ubuntu:20.04')
+                    default='ubuntu')
+parser.add_argument("--tag",
+                    dest="image_tag",
+                    help="Image tag (default: latest). Used when --image is a short name.",
+                    action='store',
+                    default='latest')
 parser.add_argument("--create-ip",
                     dest="create_ip",
                     help="Create a new IPv4 address.",
@@ -98,6 +106,10 @@ parser.add_argument("-rwd", "--rm-when-done",
                     dest="rm_when_done",
                     help="Remove the container groups after finish.",
                     action='store_true')
+parser.add_argument("--create",
+                    dest="create_image",
+                    help="Create acido-compatible image from base image (e.g., 'nuclei', 'ubuntu:20.04')",
+                    action='store')
 
 
 args = parser.parse_args()
@@ -113,7 +125,7 @@ class Acido(object):
     if args.interactive:
         print(red(BANNER))
 
-    def __init__(self, rg: str = None, login: bool = True):
+    def __init__(self, rg: str = None, login: bool = True, check_config: bool = True):
 
         self.selected_instances = []
         self.image_registry_server = None
@@ -129,13 +141,26 @@ class Acido(object):
 
         self.io_blob = None
 
+        # If explicitly running config, just run it
         if args.config:
             self.setup()
+            return
         
+        # Try to load config
+        config_exists = False
         try:
             self._load_config()
+            config_exists = True
         except FileNotFoundError:
-            self.setup()
+            # No config file exists
+            if check_config:
+                # If user is trying to run a command that requires config, prompt them
+                print(bad('No configuration found.'))
+                print(info('Please run "acido -c" to configure acido first, or use "acido -h" for help.'))
+                sys.exit(1)
+            else:
+                # Only for -h or similar cases where config is not needed
+                return
         
 
         try:
@@ -543,7 +568,7 @@ class Acido(object):
         self.rg = rg
         image_registry_server = os.getenv('IMAGE_REGISTRY_SERVER') if os.getenv('RG', None) else input(info('Image Registry Server: '))
         image_registry_username = os.getenv('IMAGE_REGISTRY_USERNAME') if os.getenv('IMAGE_REGISTRY_USERNAME', None) else input(info('Image Registry Username: '))
-        image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else input(info('Image Registry Password: '))
+        image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else getpass.getpass(info('Image Registry Password: '))
         storage_account = os.getenv('STORAGE_ACCOUNT_NAME') if os.getenv('STORAGE_ACCOUNT_NAME', None) else input(info('Storage Account Name to Use: '))
         
         if not os.getenv('STORAGE_ACCOUNT_NAME', None):
@@ -581,11 +606,207 @@ class Acido(object):
         self.storage_account = storage_account
         self._save_config()
 
+    def build_image_url(self, image_name: str, tag: str = 'latest') -> str:
+        """
+        Build full image URL from short name or return the full URL if already provided.
+        
+        Args:
+            image_name: Short image name (e.g., 'nmap') or full URL
+            tag: Image tag (default: 'latest')
+        
+        Returns:
+            Full image URL with registry server and tag
+        """
+        # Check if it's already a full URL with registry (contains a dot in the first part before /)
+        if '/' in image_name:
+            first_part = image_name.split('/')[0]
+            if '.' in first_part or '://' in image_name:
+                # It's already a full URL with registry
+                return image_name
+        
+        # Check if it already has a tag
+        if ':' in image_name:
+            # Has a tag already, just prepend registry
+            return f"{self.image_registry_server}/{image_name}"
+        
+        # Short name without tag - build full URL
+        return f"{self.image_registry_server}/{image_name}:{tag}"
+
+    def _detect_distro(self, base_image: str) -> dict:
+        """Detect the base OS/distro of the Docker image."""
+        print(info(f'Analyzing base image: {base_image}'))
+        
+        inspect_cmd = f"docker pull {base_image} && docker inspect {base_image}"
+        result = subprocess.run(inspect_cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(bad(f'Failed to pull/inspect image: {result.stderr}'))
+            print(info('Defaulting to Debian-based configuration...'))
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+        
+        # Parse JSON output
+        try:
+            inspect_data = json.loads(result.stdout)[0]
+            
+            # Check for distro indicators in Config.Env or other metadata
+            env_vars = inspect_data.get('Config', {}).get('Env', [])
+            
+            # Default to Debian-based
+            distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            
+            # Detect Alpine
+            for env in env_vars:
+                if 'alpine' in env.lower():
+                    distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
+                    break
+            
+            return distro_info
+        except (json.JSONDecodeError, KeyError, IndexError) as e:
+            print(bad(f'Failed to parse image metadata: {e}'))
+            print(info('Defaulting to Debian-based configuration...'))
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+
+    def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
+        """Generate Dockerfile content based on distro."""
+        
+        if distro_info['type'] == 'alpine':
+            return f"""FROM {base_image}
+
+RUN apk update && apk add --no-cache python3 py3-pip
+
+RUN python3 -m pip install --break-system-packages acido
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]
+"""
+        else:  # Debian/Ubuntu-based
+            return f"""FROM {base_image}
+
+RUN apt-get update && apt-get install -y python3 python3-pip && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install acido
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]
+"""
+
+    def create_acido_image(self, base_image: str):
+        """
+        Create an acido-compatible Docker image from a base image.
+        
+        Args:
+            base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04')
+        
+        Returns:
+            str: The new image name if successful, None otherwise
+        """
+        # Validate Docker is available
+        try:
+            result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                print(bad('Docker is not installed or not accessible.'))
+                print(info('Please install Docker and ensure it is in your PATH.'))
+                return None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            print(bad('Docker is not installed or not accessible.'))
+            print(info('Please install Docker and ensure it is in your PATH.'))
+            return None
+        
+        # Determine OS/package manager from base image
+        distro_info = self._detect_distro(base_image)
+        
+        # Generate Dockerfile content
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info)
+        
+        # Create temporary directory and Dockerfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dockerfile_path = os.path.join(tmpdir, 'Dockerfile')
+            with open(dockerfile_path, 'w') as f:
+                f.write(dockerfile_content)
+            
+            # Build the image
+            # Extract image name without registry/tag for naming
+            image_base_name = base_image.split('/')[-1].split(':')[0]
+            new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:latest"
+            
+            print(good(f'Building image: {new_image_name}'))
+            print(info(f'Using distro type: {distro_info["type"]}'))
+            
+            build_cmd = f"docker build -t {new_image_name} {tmpdir}"
+            result = subprocess.run(build_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(bad(f'Failed to build image:'))
+                print(result.stderr)
+                return None
+            
+            # Show build output
+            if result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        print(f'  {line}')
+            
+            print(good(f'Successfully built {new_image_name}'))
+            
+            # Login to registry
+            print(info(f'Logging in to registry...'))
+            login_cmd = f"docker login {self.image_registry_server} -u {self.image_registry_username} -p {self.image_registry_password}"
+            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(bad(f'Failed to login to registry:'))
+                print(result.stderr)
+                return None
+            
+            # Push to registry
+            print(info(f'Pushing to registry...'))
+            push_cmd = f"docker push {new_image_name}"
+            result = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
+            
+            if result.returncode != 0:
+                print(bad(f'Failed to push image:'))
+                print(result.stderr)
+                return None
+            
+            # Show push output
+            if result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        print(f'  {line}')
+            
+            print(good(f'Successfully pushed {new_image_name}'))
+            print(info(f'You can now use this image with: acido -f myfleet -im {new_image_name} ...'))
+            
+            return new_image_name
+
 def main():
     """Main entry point for the acido CLI."""
-    acido = Acido()
+    # Check if user is just asking for help - no config needed
+    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ['-h', '--help']):
+        if len(sys.argv) == 1:
+            # No arguments provided - show help message
+            print(info('Welcome to acido! Use "acido -h" for help or "acido -c" to configure.'))
+            sys.exit(0)
+        else:
+            # -h flag provided, let argparse handle it
+            parser.parse_args()
+            return
+    
+    # For -c/--config flag, config check is not needed
     if args.config:
-        acido.setup()
+        acido = Acido(check_config=False)
+        # setup() is already called in __init__ when args.config is True
+        return
+    
+    # For interactive mode, need config
+    if args.interactive:
+        acido = Acido()
+        code.interact(banner=f'acido {__version__}', local=locals())
+        return
+    
+    # For all other commands, check if config exists
+    acido = Acido()
+    
     if args.list_instances:
         acido.ls(interactive=True)
     if args.shell:
@@ -595,10 +816,12 @@ def main():
     if args.fleet:
         pool = ThreadPool(processes=30)
         args.num_instances = int(args.num_instances) if args.num_instances else 1
+        # Build full image URL from short name or keep full URL
+        full_image_url = acido.build_image_url(args.image_name, args.image_tag)
         acido.fleet(
             fleet_name=args.fleet, 
             instance_num=int(args.num_instances) if args.num_instances else 1, 
-            image_name=args.image_name, 
+            image_name=full_image_url, 
             scan_cmd=args.task, 
             input_file=args.input_file, 
             wait=int(args.wait) if args.wait else None, 
@@ -619,8 +842,8 @@ def main():
         )
     if args.remove:
         acido.rm(args.remove)
-    if args.interactive:
-        code.interact(banner=f'acido {__version__}', local=locals())
+    if args.create_image:
+        acido.create_acido_image(args.create_image)
 
 if __name__ == "__main__":
     main()
