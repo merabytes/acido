@@ -1,4 +1,4 @@
-# acido (0.16)
+# acido (0.17)
 
 Acido stands for **A**zure **C**ontainer **I**nstance **D**istributed **O**perations, with acido you can easily deploy container instances in Azure and distribute the workload of a particular task, for example, a port scanning task which has an input file with **x** hosts is splitted and distributed between **y** instances.
 
@@ -14,7 +14,7 @@ A little diagram on how the acido CLI works, for example with Nuclei:
     alias acido='python3 -m acido.cli'
     
 ### Usage:
-    usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
+    usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP] [--ip] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
               [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
 
     optional arguments:
@@ -24,11 +24,13 @@ A little diagram on how the acido CLI works, for example with Nuclei:
                             Create new fleet.
     -im IMAGE_NAME, --image IMAGE_NAME
                             Deploy an specific image.
+    --create-ip CREATE_IP Create a new IPv4 address and network profile for routing container traffic.
+    --ip                  Select an existing IPv4 address to route containers through.
     -n NUM_INSTANCES, --num-instances NUM_INSTANCES
                             Instances that the operation affect
     -t TASK, --task TASK  Execute command as an entrypoint in the fleet.
     -e EXEC_CMD, --exec EXEC_CMD
-                        Execute command on a running instance.
+                        Execute command on the selected instances.
     -i INPUT_FILE, --input-file INPUT_FILE
                             The name of the file to use on the task.
     -w WAIT, --wait WAIT  Set max timeout for the instance to finish.
@@ -183,6 +185,237 @@ Line: 684
                 return True
             ws.send(x)
         return True
+
+# Architecture
+
+## Internal Architecture Overview
+
+Acido is designed with a modular architecture that makes it easy to support multiple security tools and efficiently distribute workloads across Azure Container Instances. The system consists of several key components that work together seamlessly:
+
+### Core Components
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Acido CLI                                │
+│                      (User Interface)                            │
+└─────────────────┬───────────────────────────────────────────────┘
+                  │
+                  ├──────────────────────────────────────────────┐
+                  │                                              │
+                  ▼                                              ▼
+    ┌─────────────────────────┐              ┌──────────────────────────┐
+    │   InstanceManager       │              │     BlobManager          │
+    │  - Deploy containers    │              │  - Upload/download files │
+    │  - Manage lifecycle     │◄────────────►│  - Store outputs         │
+    │  - Execute commands     │              │  - Input distribution    │
+    └────────┬────────────────┘              └──────────┬───────────────┘
+             │                                          │
+             │ Uses Managed Identity                    │
+             ▼                                          ▼
+    ┌─────────────────────────┐              ┌──────────────────────────┐
+    │  Azure Container        │              │  Azure Blob Storage      │
+    │  Instances (ACIs)       │              │  - Container: acido      │
+    │  - Run security tools   │◄────────────►│  - Inputs & Outputs      │
+    │  - Process data chunks  │   Download   │  - UUIDs for tracking    │
+    └─────────────────────────┘   via MI     └──────────────────────────┘
+```
+
+### How It Works
+
+#### 1. Input File Distribution via Blob Storage
+
+When you run a distributed scan with an input file, acido follows this workflow:
+
+```
+Host Machine                     Blob Storage                Container Instances
+┌─────────────┐                 ┌─────────────┐            ┌──────────────────┐
+│ input.txt   │                 │             │            │  Container 1     │
+│ (1000 lines)│                 │             │            │  ┌────────────┐  │
+└──────┬──────┘                 │             │            │  │ input (50) │  │
+       │                        │             │            │  └────────────┘  │
+       │ 1. Split into chunks   │             │            └──────────────────┘
+       ├────────────────────────┤             │
+       │   Chunk 1 (50 lines)   │──Upload────►│ UUID-1     │  ┌──────────────────┐
+       │   Chunk 2 (50 lines)   │──Upload────►│ UUID-2     │  │  Container 2     │
+       │   Chunk 3 (50 lines)   │──Upload────►│ UUID-3     │  │  ┌────────────┐  │
+       │   ...                  │             │            │  │  │ input (50) │  │
+       │   Chunk 20 (50 lines)  │──Upload────►│ UUID-20    │  │  └────────────┘  │
+       └────────────────────────┘             │            │  └──────────────────┘
+                                              │            │           ...
+                                              │            │  ┌──────────────────┐
+                                              │            │  │  Container 20    │
+                                              └────Download──►│  ┌────────────┐  │
+                                                   via MI  │  │  │ input (50) │  │
+                                                           │  │  └────────────┘  │
+                                                           │  └──────────────────┘
+```
+
+**Steps:**
+1. **File Splitting**: The CLI splits the input file into N chunks (where N = number of instances)
+2. **Blob Upload**: Each chunk is uploaded to blob storage with a unique UUID identifier
+3. **Container Deployment**: Containers are deployed with environment variables containing:
+   - Blob storage account name
+   - Managed Identity client ID
+   - UUID of their assigned input chunk
+4. **Download in Container**: Each container uses Managed Identity to authenticate and download its input chunk
+5. **Processing**: The security tool processes its chunk independently
+6. **Output Collection**: Results are uploaded back to blob storage and collected by the CLI
+
+#### 2. Managed Identity for Secure Access
+
+Acido uses **Azure Managed Identity** to provide containers with secure, credential-free access to blob storage:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  Container Instance (ACI)                                       │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Environment Variables:                                   │  │
+│  │  - IDENTITY_CLIENT_ID: <managed-identity-client-id>      │  │
+│  │  - STORAGE_ACCOUNT_NAME: <storage-account>               │  │
+│  │  - RG: <resource-group>                                  │  │
+│  └────────────────────────┬─────────────────────────────────┘  │
+│                           │                                     │
+│                           ▼                                     │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  ManagedAuthentication Class                             │  │
+│  │  - Detects cloud environment (MSI_ENDPOINT)              │  │
+│  │  - Uses ManagedIdentityCredential with client_id         │  │
+│  │  - Obtains access token for storage.azure.com            │  │
+│  └────────────────────────┬─────────────────────────────────┘  │
+└───────────────────────────┼─────────────────────────────────────┘
+                            │ Token-based authentication
+                            ▼
+               ┌─────────────────────────────┐
+               │  Azure Blob Storage         │
+               │  - Validates MI token       │
+               │  - Grants read/write access │
+               └─────────────────────────────┘
+```
+
+**Benefits:**
+- **No credentials in code or environment**: No storage account keys needed in containers
+- **Automatic token management**: Azure handles token lifecycle
+- **Fine-grained permissions**: RBAC controls what each identity can access
+- **Audit trail**: All access logged in Azure Activity Logs
+
+#### 3. Supporting Multiple Security Tools
+
+The architecture is designed to be **tool-agnostic**, making it easy to support any security tool:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Acido Abstraction Layer                                        │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │  Generic Command Execution Framework                       │ │
+│  │  - Input file handling (--input-file)                      │ │
+│  │  - Command wrapper (--task)                                │ │
+│  │  - Output collection (--output)                            │ │
+│  └────────────────────────────────────────────────────────────┘ │
+└─────────────────────────┬───────────────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┬────────────────┐
+          │               │               │                │
+          ▼               ▼               ▼                ▼
+    ┌─────────┐     ┌─────────┐    ┌──────────┐    ┌──────────┐
+    │  nmap   │     │ nuclei  │    │   ffuf   │    │  masscan │
+    │         │     │         │    │          │    │          │
+    │ -iL     │     │ -list   │    │ -w       │    │ -iL      │
+    │ input   │     │ input   │    │ input    │    │ input    │
+    └─────────┘     └─────────┘    └──────────┘    └──────────┘
+```
+
+**Key Design Principles:**
+
+1. **Standard Input/Output Pattern**: All tools read from a file named `input` and write to stdout
+2. **Docker Entrypoint Execution**: Commands run via `-t` flag use the container's entrypoint
+3. **Environment Variable Injection**: Tools can access blob storage, registry credentials, etc.
+4. **Result Aggregation**: Outputs are collected via blob storage and merged by CLI
+
+**Example with different tools:**
+
+```bash
+# Nmap scan
+acido -f nmap-fleet -n 20 -im registry.io/nmap:latest \
+  -t 'nmap -iL input -p 1-1000' -i targets.txt
+
+# Nuclei scan
+acido -f nuclei-fleet -n 50 -im registry.io/nuclei:latest \
+  -t 'nuclei -list input -t /nuclei-templates/' -i urls.txt
+
+# FFUF scan
+acido -f ffuf-fleet -n 30 -im registry.io/ffuf:latest \
+  -t 'ffuf -w input -u https://target.com/FUZZ' -i wordlist.txt
+```
+
+### Data Flow Summary
+
+```
+1. User invokes CLI with task and input file
+                    ↓
+2. CLI authenticates to Azure (az login or environment credentials)
+                    ↓
+3. Input file split into N chunks (N = number of instances)
+                    ↓
+4. Chunks uploaded to blob storage (acido container)
+                    ↓
+5. Container groups created with:
+   - Base image with security tool + acido installed
+   - Managed Identity attached
+   - Environment variables (IDENTITY_CLIENT_ID, STORAGE_ACCOUNT_NAME, etc.)
+   - Command: download input chunk → run security tool → upload output
+                    ↓
+6. Containers start and use Managed Identity to:
+   - Download their assigned input chunk from blob
+   - Execute the security tool command
+   - Upload results back to blob storage
+                    ↓
+7. CLI polls containers for completion
+                    ↓
+8. CLI downloads outputs from blob storage
+                    ↓
+9. Results aggregated and saved (JSON + merged text file)
+                    ↓
+10. Optional: Containers deleted (--rm-when-done)
+```
+
+### Component Details
+
+#### InstanceManager
+- **Purpose**: Manages Azure Container Instance lifecycle
+- **Key Methods**:
+  - `deploy()`: Creates container groups with specified configuration
+  - `provision()`: Configures individual container instances
+  - `rm()`: Deletes container groups
+  - `ls()`: Lists all running instances
+- **Features**:
+  - Automatic splitting of >10 instances into multiple container groups (Azure limit)
+  - Managed Identity attachment for blob access
+  - Image registry authentication
+  - Network profile support for custom IP routing
+
+#### BlobManager
+- **Purpose**: Handles all blob storage operations
+- **Key Methods**:
+  - `upload()`: Uploads data with UUID naming
+  - `download()`: Retrieves files by UUID
+  - `use_container()`: Selects/creates storage container
+- **Authentication**: Supports managed identity, environment credentials, and connection strings
+- **Features**: Automatic UUID generation for file tracking
+
+#### ManagedAuthentication
+- **Purpose**: Provides unified authentication across Azure services
+- **Credential Chain**:
+  1. Cloud: Managed Identity → Environment Credentials
+  2. Local: Azure CLI → Environment Credentials → Client Secret
+- **Auto-detection**: Automatically detects cloud vs. local environment
+
+#### NetworkManager
+- **Purpose**: Manages virtual networks and public IPs for container groups
+- **Key Methods**:
+  - `create_ipv4()`: Creates public IP addresses
+  - `create_virtual_network()`: Sets up VNets
+  - `create_network_profile()`: Creates network profiles for ACIs
+- **Use Case**: Route all container traffic through a single public IP
 
 # Upcoming features
 
