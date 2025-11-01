@@ -987,10 +987,13 @@ CMD ["sleep", "infinity"]
                 pbar.set_description("Building image")
             
             # Build the image
-            # Extract image name without registry/tag for naming
-            image_base_name = base_image.split('/')[-1].split(':')[0]
-            # Extract tag if present in base_image, otherwise use 'latest'
-            image_tag = base_image.split(':')[-1] if ':' in base_image.split('/')[-1] else 'latest'
+            # Extract image name and tag from base_image (last component after /)
+            last_component = base_image.split('/')[-1]
+            if ':' in last_component:
+                image_base_name, image_tag = last_component.rsplit(':', 1)
+            else:
+                image_base_name = last_component
+                image_tag = 'latest'
             new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:{image_tag}"
             
             # Validate new image name too
