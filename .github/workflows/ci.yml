@@ -125,11 +125,11 @@ jobs:
         RUN cd /tmp/acido && pip install .
         
         # Install Nuclei
-        RUN wget -q https://github.com/projectdiscovery/nuclei/releases/latest/download/nuclei_3.3.2_linux_amd64.zip && \
-            unzip nuclei_3.3.2_linux_amd64.zip && \
+        RUN wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.4.10/nuclei_3.4.10_linux_amd64.zip && \
+            unzip nuclei_3.4.10_linux_amd64.zip && \
             mv nuclei /usr/local/bin/ && \
             chmod +x /usr/local/bin/nuclei && \
-            rm nuclei_3.3.2_linux_amd64.zip
+            rm nuclei_3.4.10_linux_amd64.zip
         
         CMD ["sleep", "infinity"]
         EOF
