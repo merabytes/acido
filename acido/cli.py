@@ -27,6 +27,15 @@ __author__ = "Xavier Alvarez Delgado (xalvarez@merabytes.com)"
 __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 
 parser = argparse.ArgumentParser()
+
+# Add subparsers for 'create' subcommand
+subparsers = parser.add_subparsers(dest='subcommand', help='Subcommands')
+
+# Create subcommand
+create_parser = subparsers.add_parser('create', help='Create acido-compatible image from base image')
+create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", "ubuntu:20.04")')
+
+# Regular arguments
 parser.add_argument("-c", "--config",
                     dest="config",
                     help="Start configuration of acido.",
@@ -125,6 +134,10 @@ parser.add_argument("--create",
 
 
 args = parser.parse_args()
+
+# Handle 'create' subcommand - map it to create_image for consistency
+if args.subcommand == 'create':
+    args.create_image = args.base_image
 instances_outputs = {}
 
 def build_output(result):

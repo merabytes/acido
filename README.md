@@ -70,6 +70,11 @@ paypal.com
 
 2. Create scanning image:
 ```bash
+acido create nmap
+```
+
+Or using the alternative syntax:
+```bash
 acido --create nmap
 ```
 
@@ -102,12 +107,18 @@ usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP]
              [--ip] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] 
              [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
+             {create}
+
+positional arguments:
+  {create}              Subcommands
+    create              Create acido-compatible image from base image
 
 optional arguments:
   -h, --help            Show help message
   -c, --config          Configure acido
   -f FLEET              Fleet name
   -im IMAGE_NAME        Deploy specific image
+  --create IMAGE        Create acido-compatible image (alternative syntax)
   --create-ip NAME      Create IPv4 address for routing
   --ip                  Use existing IPv4 address
   -n NUM                Number of instances
