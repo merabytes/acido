@@ -728,29 +728,38 @@ class Acido(object):
 
     def _validate_image_name(self, image_name: str) -> bool:
         """
-        Validate Docker image name to prevent command injection.
+        Validate Docker image name using allowlist approach to prevent command injection.
         
-        Valid Docker image names can contain:
-        - Lowercase letters, digits, and separators (period, underscore, hyphen)
-        - Optional registry hostname/port
-        - Optional tag after colon
-        - Optional digest after @
+        Valid Docker image names can only contain:
+        - Letters (a-z, A-Z)
+        - Digits (0-9)
+        - Dots (.)
+        - Hyphens (-)
+        - Underscores (_)
+        - Colons (:) for tags/ports
+        - Slashes (/) for namespaces/registries
+        - At signs (@) for digests
+        
+        Any other character will cause validation to fail.
         
         Returns:
             bool: True if valid, False otherwise
         """
-        # Docker image name pattern (simplified but secure)
-        # Allows: registry.io:5000/namespace/image:tag or image:tag or single char names
-        pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9._\-/:@]*[a-zA-Z0-9])?$'
+        # Allowlist approach: only allow specific characters used in Docker image names
+        # This is more secure than blacklisting dangerous characters
+        allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:/@')
         
-        if not re.match(pattern, image_name):
+        # Check if all characters in the image name are in the allowlist
+        if not all(char in allowed_chars for char in image_name):
             return False
         
-        # Additional check: no shell metacharacters
-        dangerous_chars = ['$', '`', ';', '&', '|', '>', '<', '(', ')', '{', '}', '[', ']', '\\', '"', "'", '\n', '\r']
-        for char in dangerous_chars:
-            if char in image_name:
-                return False
+        # Additional validation: must start and end with alphanumeric
+        # (single character names are allowed)
+        if not image_name:
+            return False
+        
+        if not (image_name[0].isalnum() and image_name[-1].isalnum()):
+            return False
         
         return True
 
