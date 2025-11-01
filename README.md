@@ -81,7 +81,7 @@ acido create nuclei --image projectdiscovery/nuclei:latest
 ```bash
 acido -f nmap-scan \
     -n 3 \
-    --image nmap \
+    -im nmap \
     -t 'nmap -iL input -p 0-1000' \
     -i targets.txt \
     -o output \
@@ -91,7 +91,7 @@ acido -f nmap-scan \
 Parameters:
 - `-f` Fleet name
 - `-n` Number of container instances
-- `--image` Image name
+- `-im` Image name (e.g., 'nmap', 'nuclei:latest', or full URL)
 - `-t` Command to execute
 - `-i` Input file (auto-split across containers)
 - `-o` Output file
@@ -146,7 +146,7 @@ Scan 1,000 hosts with 20 containers:
 ```bash
 acido -f nmap-fleet \
     -n 20 \
-    --image myregistry.azurecr.io/nmap:latest \
+    -im nmap \
     -t 'nmap -iL input -p- --min-rate 1000' \
     -i targets.txt \
     -o output \
@@ -160,7 +160,7 @@ Scan 10,000 URLs with 50 containers:
 ```bash
 acido -f nuclei-scan \
     -n 50 \
-    --image myregistry.azurecr.io/nuclei:latest \
+    -im nuclei \
     -t 'nuclei -list input -t /nuclei-templates/' \
     -i urls.txt \
     -o results
@@ -173,7 +173,7 @@ Scan entire network with 100 containers:
 ```bash
 acido -f masscan \
     -n 100 \
-    --image myregistry.azurecr.io/masscan:latest \
+    -im masscan \
     -t 'masscan -iL input -p0-65535 --rate 10000' \
     -i networks.txt \
     -o masscan-results

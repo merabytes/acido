@@ -106,7 +106,7 @@ jobs:
         python -m acido.cli --help
 
   acido-create-test:
-    name: Test acido create nuclei
+    name: Test Supported Security Tools
     runs-on: ubuntu-latest
     
     steps:
