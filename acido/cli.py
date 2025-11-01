@@ -109,6 +109,11 @@ parser.add_argument("--format",
                     action='store',
                     choices=['txt', 'json'],
                     default='txt')
+parser.add_argument("-q", "--quiet",
+                    dest="quiet",
+                    help="Suppress verbose output and show progress bar during fleet execution.",
+                    action='store_true',
+                    default=False)
 parser.add_argument("-rwd", "--rm-when-done",
                     dest="rm_when_done",
                     help="Remove the container groups after finish.",
@@ -864,8 +869,6 @@ def main():
         args.num_instances = int(args.num_instances) if args.num_instances else 1
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, args.image_tag)
-        # Use quiet mode (progress bar) when executing fleet without interactive mode
-        quiet = not args.interactive and args.task is not None
         acido.fleet(
             fleet_name=args.fleet, 
             instance_num=int(args.num_instances) if args.num_instances else 1, 
@@ -876,7 +879,7 @@ def main():
             write_to_file=args.write_to_file,
             output_format=args.output_format,
             interactive=bool(args.interactive),
-            quiet=quiet
+            quiet=args.quiet
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
