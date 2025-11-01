@@ -36,9 +36,14 @@ parser.add_argument("-f", "--fleet",
                     action='store')
 parser.add_argument("-im", "--image",
                     dest="image_name",
-                    help="Deploy an specific image.",
+                    help="Image name (e.g., 'nmap', 'nuclei') or full URL. Registry from config will be prepended if not a full URL.",
                     action='store',
-                    default='ubuntu:20.04')
+                    default='ubuntu')
+parser.add_argument("--tag",
+                    dest="image_tag",
+                    help="Image tag (default: latest). Used when --image is a short name.",
+                    action='store',
+                    default='latest')
 parser.add_argument("--create-ip",
                     dest="create_ip",
                     help="Create a new IPv4 address.",
@@ -601,6 +606,32 @@ class Acido(object):
         self.storage_account = storage_account
         self._save_config()
 
+    def build_image_url(self, image_name: str, tag: str = 'latest') -> str:
+        """
+        Build full image URL from short name or return the full URL if already provided.
+        
+        Args:
+            image_name: Short image name (e.g., 'nmap') or full URL
+            tag: Image tag (default: 'latest')
+        
+        Returns:
+            Full image URL with registry server and tag
+        """
+        # Check if it's already a full URL with registry (contains a dot in the first part before /)
+        if '/' in image_name:
+            first_part = image_name.split('/')[0]
+            if '.' in first_part or '://' in image_name:
+                # It's already a full URL with registry
+                return image_name
+        
+        # Check if it already has a tag
+        if ':' in image_name:
+            # Has a tag already, just prepend registry
+            return f"{self.image_registry_server}/{image_name}"
+        
+        # Short name without tag - build full URL
+        return f"{self.image_registry_server}/{image_name}:{tag}"
+
     def _detect_distro(self, base_image: str) -> dict:
         """Detect the base OS/distro of the Docker image."""
         print(info(f'Analyzing base image: {base_image}'))
@@ -785,10 +816,12 @@ def main():
     if args.fleet:
         pool = ThreadPool(processes=30)
         args.num_instances = int(args.num_instances) if args.num_instances else 1
+        # Build full image URL from short name or keep full URL
+        full_image_url = acido.build_image_url(args.image_name, args.image_tag)
         acido.fleet(
             fleet_name=args.fleet, 
             instance_num=int(args.num_instances) if args.num_instances else 1, 
-            image_name=args.image_name, 
+            image_name=full_image_url, 
             scan_cmd=args.task, 
             input_file=args.input_file, 
             wait=int(args.wait) if args.wait else None, 
