@@ -108,8 +108,6 @@ class ManagedAuthentication:
         return force or auto
 
     def extract_subscription(self, credential):
-        # Always show what type we received, per your note
-        print(type(credential))
 
         # 1) Azure CLI: list subscriptions directly
         if isinstance(credential, AzureCliCredential):

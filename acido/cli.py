@@ -208,7 +208,7 @@ class Acido(object):
         
 
         # Only try to create identity via Azure CLI if IDENTITY_CLIENT_ID is not already set
-        if not os.getenv('IDENTITY_CLIENT_ID', None):
+        if not os.getenv('IDENTITY_CLIENT_ID', None) and not os.getenv('INSTANCE_NAME', None):
             try:
                 az_identity_list = subprocess.check_output(f'az identity create --resource-group {self.rg} --name acido', shell=True)
                 az_identity_list = json.loads(az_identity_list)
