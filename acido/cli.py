@@ -740,8 +740,8 @@ class Acido(object):
             bool: True if valid, False otherwise
         """
         # Docker image name pattern (simplified but secure)
-        # Allows: registry.io:5000/namespace/image:tag or image:tag
-        pattern = r'^[a-zA-Z0-9][a-zA-Z0-9._\-/:@]*[a-zA-Z0-9]$'
+        # Allows: registry.io:5000/namespace/image:tag or image:tag or single char names
+        pattern = r'^[a-zA-Z0-9]([a-zA-Z0-9._\-/:@]*[a-zA-Z0-9])?$'
         
         if not re.match(pattern, image_name):
             return False
@@ -864,6 +864,9 @@ CMD ["sleep", "infinity"]
 """
         elif distro_info['type'] == 'rhel':
             pkg_manager = distro_info['pkg_manager']
+            # Validate pkg_manager to prevent injection
+            if pkg_manager not in ['yum', 'dnf']:
+                pkg_manager = 'yum'  # Default to yum if invalid
             return f"""FROM {base_image}
 
 RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip && {pkg_manager} clean all
