@@ -1,4 +1,4 @@
-# acido (0.18)
+# acido (0.19)
 
 **The distributed security scanning framework built for speed and scale.**
 
