@@ -110,7 +110,7 @@ class InstanceManager(ManagedAuthentication):
         deploy_instances = []
 
         if command:
-            command = f"python3 -m acido.cli -sh {quote(command)}"
+            command = f"acido -sh {quote(command)}"
 
         for i_num in range(1, instance_number + 1):
             env_vars['INSTANCE_NAME'] = f'{name}-{i_num:02d}'
@@ -118,7 +118,7 @@ class InstanceManager(ManagedAuthentication):
 
             if input_files:
                 file_uuid = input_files.pop(0)
-                upload_command = f"python3 -m acido.cli -d {file_uuid}"
+                upload_command = f"acido -d {file_uuid}"
                 if scan_cmd:
                     scan_cmd = upload_command + " && " + scan_cmd
                 else:

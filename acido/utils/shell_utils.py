@@ -48,9 +48,9 @@ def exec_command(rg, cg, cont, command, max_retries, input_file):
                     ], env=env)
     time.sleep(15)
     if input_file:
-        subprocess.Popen(["tmux", "send-keys", "-t", cont, f"python3 -m acido.cli -d {input_file}", "Enter"], env=env)
+        subprocess.Popen(["tmux", "send-keys", "-t", cont, f"acido -d {input_file}", "Enter"], env=env)
         time.sleep(5)
-    subprocess.Popen(["tmux", "send-keys", "-t", cont, f"nohup python3 -m acido.cli -sh '{command}' > temp &", "Enter"], env=env)
+    subprocess.Popen(["tmux", "send-keys", "-t", cont, f"nohup acido -sh '{command}' > temp &", "Enter"], env=env)
     time.sleep(2)
     subprocess.Popen(["tmux", "send-keys", "-t", cont, "Enter"], env=env)
 
