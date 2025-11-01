@@ -2,6 +2,8 @@
 
 This document explains how to configure the required environment variables for the CI/CD pipeline.
 
+> **Note:** For detailed information about Azure permissions and creating a Service Principal, see [AZURE_PERMISSIONS.md](AZURE_PERMISSIONS.md).
+
 ## Required GitHub Secrets
 
 To run the full integration tests with Azure, you need to configure the following secrets in your GitHub repository:
@@ -31,6 +33,8 @@ For full Azure integration tests, you can also configure:
 | `AZURE_CLIENT_SECRET` | Azure Service Principal Client Secret |
 | `AZURE_TENANT_ID` | Azure Tenant ID |
 | `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID |
+
+**See [AZURE_PERMISSIONS.md](AZURE_PERMISSIONS.md) for detailed instructions on creating a Service Principal with the correct permissions.**
 
 ## CI Workflow Overview
 
