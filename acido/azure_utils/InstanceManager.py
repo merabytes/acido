@@ -174,7 +174,7 @@ class InstanceManager(ManagedAuthentication):
                 results[f'{name}-{i_num:02d}'] = ok
         except HttpResponseError as e:
             ok = False
-            print(bad(e.message))
+            print(bad(str(e)))
             raise e
 
         self.env_vars.clear()
@@ -201,7 +201,7 @@ class InstanceManager(ManagedAuthentication):
             if e.status_code == 404:
                 return False
             else:
-                print(bad(e.message))
+                print(bad(str(e)))
         return cg
 
     def ls(self):
@@ -210,7 +210,7 @@ class InstanceManager(ManagedAuthentication):
                 resource_group_name=self.resource_group,
             )
         except HttpResponseError as e:
-            print(bad(e.message))
+            print(bad(str(e)))
             return []
         return cg
 
