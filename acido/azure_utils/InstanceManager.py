@@ -6,7 +6,7 @@ from azure.mgmt.containerinstance.models import (
     ResourceRequests, OperatingSystemTypes, EnvironmentVariable,
     ResourceIdentityType)
 from azure.mgmt.containerinstance.models import ContainerGroupIdentity, UserAssignedIdentities
-from azure.core.exceptions import HttpResponseError
+from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 from huepy import *
 from shlex import quote
 import logging
@@ -180,16 +180,21 @@ class InstanceManager(ManagedAuthentication):
         self.env_vars.clear()
         return results, input_files
 
-    def rm(self, group_name):
+    def rm(self, group_name: str) -> bool:
         try:
-            self._client.container_groups.delete(
+            poller = self._client.container_groups.begin_delete(
                 resource_group_name=self.resource_group,
-                container_group_name=group_name
+                container_group_name=group_name,
             )
-        except Exception as e:
-            print(str(e))
+            # wait until the delete finishes (raise on failure)
+            poller.result()
+            return True
+        except ResourceNotFoundError:
+            print(f"Container group '{group_name}' not found.")
             return False
-        return True
+        except HttpResponseError as e:
+            print(f"Delete failed: {e}")
+            return False
 
     def get(self, group_name):
         try:

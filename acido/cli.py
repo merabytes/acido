@@ -391,8 +391,8 @@ class Acido(object):
         print(good(f"Successfully created new instance/s: [ {bold(' '.join(all_names))} ]"))
 
         if scan_cmd:
-            print(good('Waiting 4 minutes until the machines get provisioned...'))
-            time.sleep(240)
+            print(good('Waiting 1 minute until the container/s group/s gets provisioned...'))
+            time.sleep(60)
             print(good('Waiting for outputs...'))
 
             for cg, containers in response.items():
