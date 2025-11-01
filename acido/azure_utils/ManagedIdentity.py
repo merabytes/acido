@@ -7,6 +7,10 @@ import getpass
 from huepy import *
 import sys
 import traceback
+import logging
+
+# Suppress Azure CLI credential warnings when using alternative credentials
+logging.getLogger('azure.identity').setLevel(logging.ERROR)
 
 __author__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
@@ -62,7 +66,7 @@ class ManagedAuthentication:
         try:
             cred = AzureCliCredential()
         except Exception:
-            print(traceback.format_exc())
+            # Silently return None to allow fallback to other credential methods
             return None
         return cred
 
