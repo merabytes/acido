@@ -1,6 +1,8 @@
 import argparse
 import json
 import subprocess
+import getpass
+import sys
 from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
@@ -113,7 +115,7 @@ class Acido(object):
     if args.interactive:
         print(red(BANNER))
 
-    def __init__(self, rg: str = None, login: bool = True):
+    def __init__(self, rg: str = None, login: bool = True, check_config: bool = True):
 
         self.selected_instances = []
         self.image_registry_server = None
@@ -129,13 +131,26 @@ class Acido(object):
 
         self.io_blob = None
 
+        # If explicitly running config, just run it
         if args.config:
             self.setup()
+            return
         
+        # Try to load config
+        config_exists = False
         try:
             self._load_config()
+            config_exists = True
         except FileNotFoundError:
-            self.setup()
+            # No config file exists
+            if check_config:
+                # If user is trying to run a command that requires config, prompt them
+                print(bad('No configuration found.'))
+                print(info('Please run "acido -c" to configure acido first, or use "acido -h" for help.'))
+                sys.exit(1)
+            else:
+                # Only for -h or similar cases where config is not needed
+                return
         
 
         try:
@@ -543,7 +558,7 @@ class Acido(object):
         self.rg = rg
         image_registry_server = os.getenv('IMAGE_REGISTRY_SERVER') if os.getenv('RG', None) else input(info('Image Registry Server: '))
         image_registry_username = os.getenv('IMAGE_REGISTRY_USERNAME') if os.getenv('IMAGE_REGISTRY_USERNAME', None) else input(info('Image Registry Username: '))
-        image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else input(info('Image Registry Password: '))
+        image_registry_password = os.getenv('IMAGE_REGISTRY_PASSWORD') if os.getenv('IMAGE_REGISTRY_PASSWORD', None) else getpass.getpass(info('Image Registry Password: '))
         storage_account = os.getenv('STORAGE_ACCOUNT_NAME') if os.getenv('STORAGE_ACCOUNT_NAME', None) else input(info('Storage Account Name to Use: '))
         
         if not os.getenv('STORAGE_ACCOUNT_NAME', None):
@@ -583,9 +598,32 @@ class Acido(object):
 
 def main():
     """Main entry point for the acido CLI."""
-    acido = Acido()
+    # Check if user is just asking for help - no config needed
+    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] in ['-h', '--help']):
+        if len(sys.argv) == 1:
+            # No arguments provided - show help message
+            print(info('Welcome to acido! Use "acido -h" for help or "acido -c" to configure.'))
+            sys.exit(0)
+        else:
+            # -h flag provided, let argparse handle it
+            parser.parse_args()
+            return
+    
+    # For -c/--config flag, config check is not needed
     if args.config:
-        acido.setup()
+        acido = Acido(check_config=False)
+        # setup() is already called in __init__ when args.config is True
+        return
+    
+    # For interactive mode, need config
+    if args.interactive:
+        acido = Acido()
+        code.interact(banner=f'acido {__version__}', local=locals())
+        return
+    
+    # For all other commands, check if config exists
+    acido = Acido()
+    
     if args.list_instances:
         acido.ls(interactive=True)
     if args.shell:
@@ -619,8 +657,6 @@ def main():
         )
     if args.remove:
         acido.rm(args.remove)
-    if args.interactive:
-        code.interact(banner=f'acido {__version__}', local=locals())
 
 if __name__ == "__main__":
     main()
