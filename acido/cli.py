@@ -34,6 +34,7 @@ subparsers = parser.add_subparsers(dest='subcommand', help='Subcommands')
 # Create subcommand
 create_parser = subparsers.add_parser('create', help='Create acido-compatible image from base image')
 create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", "ubuntu:20.04")')
+create_parser.add_argument('--image', dest='base_image_url', help='Full Docker image URL to use as base (e.g., "projectdiscovery/nuclei:latest")')
 
 # Regular arguments
 parser.add_argument("-c", "--config",
@@ -137,7 +138,8 @@ args = parser.parse_args()
 
 # Handle 'create' subcommand - map it to create_image for consistency
 if args.subcommand == 'create':
-    args.create_image = args.base_image
+    # Use --image value if provided, otherwise use base_image positional arg
+    args.create_image = args.base_image_url if hasattr(args, 'base_image_url') and args.base_image_url else args.base_image
 instances_outputs = {}
 
 def build_output(result):
