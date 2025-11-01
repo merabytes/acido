@@ -726,48 +726,137 @@ class Acido(object):
         # Short name without tag - build full URL
         return f"{self.image_registry_server}/{image_name}:{tag}"
 
+    def _validate_image_name(self, image_name: str) -> bool:
+        """
+        Validate Docker image name using allowlist approach to prevent command injection.
+        
+        Valid Docker image names can only contain:
+        - Letters (a-z, A-Z)
+        - Digits (0-9)
+        - Dots (.)
+        - Hyphens (-)
+        - Underscores (_)
+        - Colons (:) for tags/ports
+        - Slashes (/) for namespaces/registries
+        - At signs (@) for digests
+        
+        Any other character will cause validation to fail.
+        
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        # Allowlist approach: only allow specific characters used in Docker image names
+        # This is more secure than blacklisting dangerous characters
+        allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_:/@')
+        
+        # Check if all characters in the image name are in the allowlist
+        if not all(char in allowed_chars for char in image_name):
+            return False
+        
+        # Additional validation: must start and end with alphanumeric
+        # (single character names are allowed)
+        if not image_name:
+            return False
+        
+        if not (image_name[0].isalnum() and image_name[-1].isalnum()):
+            return False
+        
+        return True
+
     def _detect_distro(self, base_image: str) -> dict:
-        """Detect the base OS/distro of the Docker image."""
+        """Detect the base OS/distro of the Docker image by running it and checking package managers."""
         print(info(f'Analyzing base image: {base_image}'))
+        
+        # Validate image name to prevent command injection
+        if not self._validate_image_name(base_image):
+            print(bad(f'Invalid Docker image name: {base_image}'))
+            print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
+            print(info('Defaulting to Debian-based configuration...'))
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
         
         # Login to Docker Hub if credentials are available (for private images or rate limiting)
         if self.docker_username and self.docker_password:
             print(info('Logging in to Docker Hub...'))
-            login_cmd = f"docker login -u {self.docker_username} -p {self.docker_password}"
-            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            # Use subprocess.run with list to avoid shell injection
+            result = subprocess.run(
+                ['docker', 'login', '-u', self.docker_username, '--password-stdin'],
+                input=self.docker_password.encode(),
+                capture_output=True,
+                text=False
+            )
             if result.returncode != 0:
-                print(bad(f'Warning: Failed to login to Docker Hub: {result.stderr}'))
+                print(bad(f'Warning: Failed to login to Docker Hub'))
                 print(info('Continuing without Docker Hub authentication...'))
         
-        inspect_cmd = f"docker pull {base_image} && docker inspect {base_image}"
-        result = subprocess.run(inspect_cmd, shell=True, capture_output=True, text=True)
+        # Pull the image first
+        result = subprocess.run(['docker', 'pull', base_image], capture_output=True, text=True)
         
         if result.returncode != 0:
-            print(bad(f'Failed to pull/inspect image: {result.stderr}'))
+            print(bad(f'Failed to pull image: {result.stderr}'))
             print(info('Defaulting to Debian-based configuration...'))
             return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
         
-        # Parse JSON output
-        try:
-            inspect_data = json.loads(result.stdout)[0]
+        # Method 1: Check /etc/os-release for distro information
+        print(info('Detecting distro by checking OS release info...'))
+        result = subprocess.run(
+            ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
+             'cat /etc/os-release 2>/dev/null || cat /etc/alpine-release 2>/dev/null || echo unknown'],
+            capture_output=True, text=True
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            os_info = result.stdout.lower()
             
-            # Check for distro indicators in Config.Env or other metadata
-            env_vars = inspect_data.get('Config', {}).get('Env', [])
+            # Check for Alpine
+            if 'alpine' in os_info:
+                print(good('Detected Alpine Linux'))
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
             
-            # Default to Debian-based
-            distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            # Check for Debian/Ubuntu
+            if 'debian' in os_info or 'ubuntu' in os_info:
+                print(good('Detected Debian/Ubuntu'))
+                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
             
-            # Detect Alpine
-            for env in env_vars:
-                if 'alpine' in env.lower():
-                    distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
-                    break
+            # Check for RHEL/CentOS/Fedora
+            if 'rhel' in os_info or 'centos' in os_info or 'fedora' in os_info or 'red hat' in os_info:
+                print(good('Detected RHEL/CentOS/Fedora'))
+                # Check if dnf or yum is available
+                pkg_check = subprocess.run(
+                    ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
+                     'which dnf 2>/dev/null || which yum 2>/dev/null'],
+                    capture_output=True, text=True
+                )
+                pkg_manager = 'dnf' if 'dnf' in pkg_check.stdout else 'yum'
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': pkg_manager}
+        
+        # Method 2: Check which package managers are available
+        print(info('Detecting distro by checking available package managers...'))
+        result = subprocess.run(
+            ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
+             'which apk apt-get yum dnf 2>/dev/null || true'],
+            capture_output=True, text=True
+        )
+        
+        if result.returncode == 0 and result.stdout:
+            pkg_managers = result.stdout.strip()
             
-            return distro_info
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            print(bad(f'Failed to parse image metadata: {e}'))
-            print(info('Defaulting to Debian-based configuration...'))
-            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            # Check in order of specificity
+            if 'apk' in pkg_managers:
+                print(good('Detected Alpine Linux (via apk)'))
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
+            elif 'apt-get' in pkg_managers:
+                print(good('Detected Debian/Ubuntu (via apt-get)'))
+                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            elif 'dnf' in pkg_managers:
+                print(good('Detected Fedora/RHEL (via dnf)'))
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'dnf'}
+            elif 'yum' in pkg_managers:
+                print(good('Detected CentOS/RHEL (via yum)'))
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum'}
+        
+        # Default to Debian if detection fails
+        print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
+        return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
 
     def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
         """Generate Dockerfile content based on distro."""
@@ -778,6 +867,20 @@ class Acido(object):
 RUN apk update && apk add --no-cache python3 py3-pip
 
 RUN python3 -m pip install --break-system-packages acido
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]
+"""
+        elif distro_info['type'] == 'rhel':
+            pkg_manager = distro_info['pkg_manager']
+            # Validate pkg_manager to prevent injection
+            if pkg_manager not in ['yum', 'dnf']:
+                pkg_manager = 'yum'  # Default to yum if invalid
+            return f"""FROM {base_image}
+
+RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip && {pkg_manager} clean all
+
+RUN python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
@@ -815,6 +918,12 @@ CMD ["sleep", "infinity"]
             print(info('Please install Docker and ensure it is in your PATH.'))
             return None
         
+        # Validate image name before using it
+        if not self._validate_image_name(base_image):
+            print(bad(f'Invalid Docker image name: {base_image}'))
+            print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
+            return None
+        
         # Determine OS/package manager from base image
         distro_info = self._detect_distro(base_image)
         
@@ -832,11 +941,18 @@ CMD ["sleep", "infinity"]
             image_base_name = base_image.split('/')[-1].split(':')[0]
             new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:latest"
             
+            # Validate new image name too
+            if not self._validate_image_name(new_image_name):
+                print(bad(f'Generated invalid image name: {new_image_name}'))
+                return None
+            
             print(good(f'Building image: {new_image_name}'))
             print(info(f'Using distro type: {distro_info["type"]}'))
             
-            build_cmd = f"docker build -t {new_image_name} {tmpdir}"
-            result = subprocess.run(build_cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                ['docker', 'build', '-t', new_image_name, tmpdir],
+                capture_output=True, text=True
+            )
             
             if result.returncode != 0:
                 print(bad(f'Failed to build image:'))
@@ -853,18 +969,24 @@ CMD ["sleep", "infinity"]
             
             # Login to registry
             print(info(f'Logging in to registry...'))
-            login_cmd = f"docker login {self.image_registry_server} -u {self.image_registry_username} -p {self.image_registry_password}"
-            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                ['docker', 'login', self.image_registry_server, '-u', self.image_registry_username, 
+                 '--password-stdin'],
+                input=self.image_registry_password.encode(),
+                capture_output=True,
+                text=False
+            )
             
             if result.returncode != 0:
-                print(bad(f'Failed to login to registry:'))
-                print(result.stderr)
+                print(bad(f'Failed to login to registry'))
                 return None
             
             # Push to registry
             print(info(f'Pushing to registry...'))
-            push_cmd = f"docker push {new_image_name}"
-            result = subprocess.run(push_cmd, shell=True, capture_output=True, text=True)
+            result = subprocess.run(
+                ['docker', 'push', new_image_name],
+                capture_output=True, text=True
+            )
             
             if result.returncode != 0:
                 print(bad(f'Failed to push image:'))
