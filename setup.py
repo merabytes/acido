@@ -38,6 +38,11 @@ setup(
         'msrestazure',
         'beaupy==3.8.2'
     ],
+    entry_points={
+        'console_scripts': [
+            'acido=acido.cli:main',
+        ],
+    },
     keywords=[
         'Security',
         'Cloud Computing',

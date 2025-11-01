@@ -85,9 +85,6 @@ Inspired by [axiom](https://github.com/pry0cc/axiom), acido brings distributed s
 
 **Note**: Depending on your Azure quota limits, you may need to request container group limit increases through Azure support.
 
-### Add an alias for convenience (.bashrc / .zshrc):
-    alias acido='python3 -m acido.cli'
-
 ## CLI Reference
 
 Acido provides a powerful command-line interface for managing distributed security scans:
@@ -300,7 +297,6 @@ acido -f screenshot-scan \
 
 ### Step 2: Install acido and configure Azure credentials
     pip install acido
-    python3 -m acido.cli -c
     $ acido -c
     [+] Selecting I/O storage account (acido).
     [!] Please provide a Resource Group Name to deploy the ACIs: Merabytes

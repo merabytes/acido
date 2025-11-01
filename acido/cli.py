@@ -581,7 +581,8 @@ class Acido(object):
         self.storage_account = storage_account
         self._save_config()
 
-if __name__ == "__main__":
+def main():
+    """Main entry point for the acido CLI."""
     acido = Acido()
     if args.config:
         acido.setup()
@@ -620,3 +621,6 @@ if __name__ == "__main__":
         acido.rm(args.remove)
     if args.interactive:
         code.interact(banner=f'acido {__version__}', local=locals())
+
+if __name__ == "__main__":
+    main()
