@@ -26,6 +26,9 @@ from tqdm import tqdm
 __author__ = "Xavier Alvarez Delgado (xalvarez@merabytes.com)"
 __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 
+# Constants
+ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
+
 parser = argparse.ArgumentParser()
 
 # Add subparsers for 'create' subcommand
@@ -960,7 +963,7 @@ CMD ["sleep", "infinity"]
         # Initialize progress bar if quiet mode
         pbar = None
         if quiet:
-            pbar = tqdm(total=5, desc="Creating acido image", unit="step")
+            pbar = tqdm(total=ACIDO_CREATE_STEPS, desc="Creating acido image", unit="step")
             pbar.set_description("Detecting distro")
         
         # Determine OS/package manager from base image
@@ -986,7 +989,9 @@ CMD ["sleep", "infinity"]
             # Build the image
             # Extract image name without registry/tag for naming
             image_base_name = base_image.split('/')[-1].split(':')[0]
-            new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:latest"
+            # Extract tag if present in base_image, otherwise use 'latest'
+            image_tag = base_image.split(':')[-1] if ':' in base_image.split('/')[-1] else 'latest'
+            new_image_name = f"{self.image_registry_server}/{image_base_name}-acido:{image_tag}"
             
             # Validate new image name too
             if not self._validate_image_name(new_image_name):
@@ -1075,7 +1080,7 @@ CMD ["sleep", "infinity"]
                 pbar.close()
             
             # Extract short name for user-friendly message
-            short_name = f"{image_base_name}-acido:latest"
+            short_name = f"{image_base_name}-acido:{image_tag}"
             
             if not quiet:
                 print(good(f'Successfully pushed {new_image_name}'))
