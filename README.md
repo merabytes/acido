@@ -121,6 +121,8 @@ The result of doing this, is that acido automatically creates 2 container groups
     $ az acr create --resource-group Merabytes \
     --name merabytes --sku Basic
 
+> **Note:** For production use or CI/CD pipelines, consider creating a Service Principal with appropriate permissions. See [.github/AZURE_PERMISSIONS.md](.github/AZURE_PERMISSIONS.md) for detailed instructions on setting up Azure permissions and authentication.
+
 #### Requirement 2: Install acido and configure your RG & Registry
     pip install acido
     python3 -m acido.cli -c

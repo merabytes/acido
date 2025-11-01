@@ -17,7 +17,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 setup(
     name='acido',
     packages=['acido', 'acido.azure_utils', 'acido.utils'],
-    version='0.14',
+    version='0.15',
     description='Azure Container Instance Distributed Operations',
     long_description=readme,
     long_description_content_type='text/markdown',
@@ -26,17 +26,17 @@ setup(
     url='https://github.com/merabytes/acido',
     license='MIT',
     install_requires=[
-        'azure-cli==2.18.0',
-        'azure-core==1.10.0',
-        'azure-mgmt-core==1.2.1',
-        'azure.identity==1.3',
-        'azure.keyvault.secrets==4.2.0',
-        'azure.storage.blob==12.7.1',
-        'PyJWT==1.7.1',
-        'websockets',
-        'huepy',
-        'msrestazure',
-        'beaupy'
+        'azure-cli==2.61.0',
+        'azure-core==1.30.2',
+        'azure-mgmt-core==1.4.0',
+        'azure.identity==1.17.0',
+        'azure.keyvault.secrets==4.7.0',
+        'azure.storage.blob==12.20.0',
+        'azure.mgmt.network==25.4.0',
+        'websockets==12.0',
+        'huepy==1.2.1',
+        'msrestazure==0.6.4.post1',
+        'beaupy==3.8.2'
     ],
     keywords=[
         'Security',
