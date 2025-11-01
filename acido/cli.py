@@ -47,7 +47,7 @@ parser.add_argument("-f", "--fleet",
                     action='store')
 parser.add_argument("-im", "--image",
                     dest="image_name",
-                    help="Image name (e.g., 'nmap', 'nuclei') or full URL. Registry from config will be prepended if not a full URL.",
+                    help="Image name (e.g., 'nmap', 'nuclei', 'nuclei:latest') or full URL. Short names will be converted to registry/name-acido:tag format.",
                     action='store',
                     default='ubuntu')
 parser.add_argument("--tag",
@@ -704,9 +704,15 @@ class Acido(object):
         """
         Build full image URL from short name or return the full URL if already provided.
         
+        For fleet operations: Converts short names to registry/name-acido:tag format.
+        Examples:
+            'nuclei' -> 'registry.azurecr.io/nuclei-acido:latest'
+            'nuclei:v2' -> 'registry.azurecr.io/nuclei-acido:v2'
+            'registry.azurecr.io/nuclei-acido:latest' -> 'registry.azurecr.io/nuclei-acido:latest' (unchanged)
+        
         Args:
-            image_name: Short image name (e.g., 'nmap') or full URL
-            tag: Image tag (default: 'latest')
+            image_name: Short image name (e.g., 'nmap', 'nuclei:v2') or full URL
+            tag: Image tag (default: 'latest'), used only for short names without tags
         
         Returns:
             Full image URL with registry server and tag
@@ -718,13 +724,15 @@ class Acido(object):
                 # It's already a full URL with registry
                 return image_name
         
-        # Check if it already has a tag
+        # Extract image name and tag if present
         if ':' in image_name:
-            # Has a tag already, just prepend registry
-            return f"{self.image_registry_server}/{image_name}"
+            base_name, image_tag = image_name.rsplit(':', 1)
+        else:
+            base_name = image_name
+            image_tag = tag
         
-        # Short name without tag - build full URL
-        return f"{self.image_registry_server}/{image_name}:{tag}"
+        # Build full URL with -acido suffix
+        return f"{self.image_registry_server}/{base_name}-acido:{image_tag}"
 
     def _validate_image_name(self, image_name: str) -> bool:
         """
@@ -763,20 +771,23 @@ class Acido(object):
         
         return True
 
-    def _detect_distro(self, base_image: str) -> dict:
+    def _detect_distro(self, base_image: str, quiet: bool = False) -> dict:
         """Detect the base OS/distro of the Docker image by running it and checking package managers."""
-        print(info(f'Analyzing base image: {base_image}'))
+        if not quiet:
+            print(info(f'Analyzing base image: {base_image}'))
         
         # Validate image name to prevent command injection
         if not self._validate_image_name(base_image):
-            print(bad(f'Invalid Docker image name: {base_image}'))
-            print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
-            print(info('Defaulting to Debian-based configuration...'))
+            if not quiet:
+                print(bad(f'Invalid Docker image name: {base_image}'))
+                print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
+                print(info('Defaulting to Debian-based configuration...'))
             return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
         
         # Login to Docker Hub if credentials are available (for private images or rate limiting)
         if self.docker_username and self.docker_password:
-            print(info('Logging in to Docker Hub...'))
+            if not quiet:
+                print(info('Logging in to Docker Hub...'))
             # Use subprocess.run with list to avoid shell injection
             result = subprocess.run(
                 ['docker', 'login', '-u', self.docker_username, '--password-stdin'],
@@ -785,19 +796,22 @@ class Acido(object):
                 text=False
             )
             if result.returncode != 0:
-                print(bad(f'Warning: Failed to login to Docker Hub'))
-                print(info('Continuing without Docker Hub authentication...'))
+                if not quiet:
+                    print(bad(f'Warning: Failed to login to Docker Hub'))
+                    print(info('Continuing without Docker Hub authentication...'))
         
         # Pull the image first
         result = subprocess.run(['docker', 'pull', base_image], capture_output=True, text=True)
         
         if result.returncode != 0:
-            print(bad(f'Failed to pull image: {result.stderr}'))
-            print(info('Defaulting to Debian-based configuration...'))
+            if not quiet:
+                print(bad(f'Failed to pull image: {result.stderr}'))
+                print(info('Defaulting to Debian-based configuration...'))
             return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
         
         # Method 1: Check /etc/os-release for distro information
-        print(info('Detecting distro by checking OS release info...'))
+        if not quiet:
+            print(info('Detecting distro by checking OS release info...'))
         result = subprocess.run(
             ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
              'cat /etc/os-release 2>/dev/null || cat /etc/alpine-release 2>/dev/null || echo unknown'],
@@ -809,17 +823,20 @@ class Acido(object):
             
             # Check for Alpine
             if 'alpine' in os_info:
-                print(good('Detected Alpine Linux'))
+                if not quiet:
+                    print(good('Detected Alpine Linux'))
                 return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
             
             # Check for Debian/Ubuntu
             if 'debian' in os_info or 'ubuntu' in os_info:
-                print(good('Detected Debian/Ubuntu'))
+                if not quiet:
+                    print(good('Detected Debian/Ubuntu'))
                 return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
             
             # Check for RHEL/CentOS/Fedora
             if 'rhel' in os_info or 'centos' in os_info or 'fedora' in os_info or 'red hat' in os_info:
-                print(good('Detected RHEL/CentOS/Fedora'))
+                if not quiet:
+                    print(good('Detected RHEL/CentOS/Fedora'))
                 # Check if dnf or yum is available
                 pkg_check = subprocess.run(
                     ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
@@ -830,7 +847,8 @@ class Acido(object):
                 return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': pkg_manager}
         
         # Method 2: Check which package managers are available
-        print(info('Detecting distro by checking available package managers...'))
+        if not quiet:
+            print(info('Detecting distro by checking available package managers...'))
         result = subprocess.run(
             ['docker', 'run', '--rm', '--entrypoint', '', base_image, 'sh', '-c',
              'which apk apt-get yum dnf 2>/dev/null || true'],
@@ -842,20 +860,25 @@ class Acido(object):
             
             # Check in order of specificity
             if 'apk' in pkg_managers:
-                print(good('Detected Alpine Linux (via apk)'))
+                if not quiet:
+                    print(good('Detected Alpine Linux (via apk)'))
                 return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
             elif 'apt-get' in pkg_managers:
-                print(good('Detected Debian/Ubuntu (via apt-get)'))
+                if not quiet:
+                    print(good('Detected Debian/Ubuntu (via apt-get)'))
                 return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
             elif 'dnf' in pkg_managers:
-                print(good('Detected Fedora/RHEL (via dnf)'))
+                if not quiet:
+                    print(good('Detected Fedora/RHEL (via dnf)'))
                 return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'dnf'}
             elif 'yum' in pkg_managers:
-                print(good('Detected CentOS/RHEL (via yum)'))
+                if not quiet:
+                    print(good('Detected CentOS/RHEL (via yum)'))
                 return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum'}
         
         # Default to Debian if detection fails
-        print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
+        if not quiet:
+            print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
 
     def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
@@ -902,12 +925,13 @@ ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
 
-    def create_acido_image(self, base_image: str):
+    def create_acido_image(self, base_image: str, quiet: bool = False):
         """
         Create an acido-compatible Docker image from a base image.
         
         Args:
             base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04')
+            quiet: Suppress verbose output and show progress bar
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -916,22 +940,35 @@ CMD ["sleep", "infinity"]
         try:
             result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
             if result.returncode != 0:
-                print(bad('Docker is not installed or not accessible.'))
-                print(info('Please install Docker and ensure it is in your PATH.'))
+                if not quiet:
+                    print(bad('Docker is not installed or not accessible.'))
+                    print(info('Please install Docker and ensure it is in your PATH.'))
                 return None
         except (subprocess.TimeoutExpired, FileNotFoundError):
-            print(bad('Docker is not installed or not accessible.'))
-            print(info('Please install Docker and ensure it is in your PATH.'))
+            if not quiet:
+                print(bad('Docker is not installed or not accessible.'))
+                print(info('Please install Docker and ensure it is in your PATH.'))
             return None
         
         # Validate image name before using it
         if not self._validate_image_name(base_image):
-            print(bad(f'Invalid Docker image name: {base_image}'))
-            print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
+            if not quiet:
+                print(bad(f'Invalid Docker image name: {base_image}'))
+                print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
             return None
         
+        # Initialize progress bar if quiet mode
+        pbar = None
+        if quiet:
+            pbar = tqdm(total=5, desc="Creating acido image", unit="step")
+            pbar.set_description("Detecting distro")
+        
         # Determine OS/package manager from base image
-        distro_info = self._detect_distro(base_image)
+        distro_info = self._detect_distro(base_image, quiet=quiet)
+        
+        if quiet and pbar:
+            pbar.update(1)
+            pbar.set_description("Generating Dockerfile")
         
         # Generate Dockerfile content
         dockerfile_content = self._generate_dockerfile(base_image, distro_info)
@@ -942,6 +979,10 @@ CMD ["sleep", "infinity"]
             with open(dockerfile_path, 'w') as f:
                 f.write(dockerfile_content)
             
+            if quiet and pbar:
+                pbar.update(1)
+                pbar.set_description("Building image")
+            
             # Build the image
             # Extract image name without registry/tag for naming
             image_base_name = base_image.split('/')[-1].split(':')[0]
@@ -949,11 +990,15 @@ CMD ["sleep", "infinity"]
             
             # Validate new image name too
             if not self._validate_image_name(new_image_name):
-                print(bad(f'Generated invalid image name: {new_image_name}'))
+                if not quiet:
+                    print(bad(f'Generated invalid image name: {new_image_name}'))
+                if pbar:
+                    pbar.close()
                 return None
             
-            print(good(f'Building image: {new_image_name}'))
-            print(info(f'Using distro type: {distro_info["type"]}'))
+            if not quiet:
+                print(good(f'Building image: {new_image_name}'))
+                print(info(f'Using distro type: {distro_info["type"]}'))
             
             result = subprocess.run(
                 ['docker', 'build', '-t', new_image_name, tmpdir],
@@ -961,20 +1006,29 @@ CMD ["sleep", "infinity"]
             )
             
             if result.returncode != 0:
-                print(bad(f'Failed to build image:'))
-                print(result.stderr)
+                if not quiet:
+                    print(bad(f'Failed to build image:'))
+                    print(result.stderr)
+                if pbar:
+                    pbar.close()
                 return None
             
-            # Show build output
-            if result.stdout:
+            # Show build output only if not quiet
+            if not quiet and result.stdout:
                 for line in result.stdout.split('\n'):
                     if line.strip():
                         print(f'  {line}')
             
-            print(good(f'Successfully built {new_image_name}'))
+            if not quiet:
+                print(good(f'Successfully built {new_image_name}'))
+            
+            if quiet and pbar:
+                pbar.update(1)
+                pbar.set_description("Logging in to registry")
             
             # Login to registry
-            print(info(f'Logging in to registry...'))
+            if not quiet:
+                print(info(f'Logging in to registry...'))
             result = subprocess.run(
                 ['docker', 'login', self.image_registry_server, '-u', self.image_registry_username, 
                  '--password-stdin'],
@@ -984,29 +1038,48 @@ CMD ["sleep", "infinity"]
             )
             
             if result.returncode != 0:
-                print(bad(f'Failed to login to registry'))
+                if not quiet:
+                    print(bad(f'Failed to login to registry'))
+                if pbar:
+                    pbar.close()
                 return None
             
+            if quiet and pbar:
+                pbar.update(1)
+                pbar.set_description("Pushing to registry")
+            
             # Push to registry
-            print(info(f'Pushing to registry...'))
+            if not quiet:
+                print(info(f'Pushing to registry...'))
             result = subprocess.run(
                 ['docker', 'push', new_image_name],
                 capture_output=True, text=True
             )
             
             if result.returncode != 0:
-                print(bad(f'Failed to push image:'))
-                print(result.stderr)
+                if not quiet:
+                    print(bad(f'Failed to push image:'))
+                    print(result.stderr)
+                if pbar:
+                    pbar.close()
                 return None
             
-            # Show push output
-            if result.stdout:
+            # Show push output only if not quiet
+            if not quiet and result.stdout:
                 for line in result.stdout.split('\n'):
                     if line.strip():
                         print(f'  {line}')
             
-            print(good(f'Successfully pushed {new_image_name}'))
-            print(info(f'You can now use this image with: acido -f myfleet -im {new_image_name} ...'))
+            if quiet and pbar:
+                pbar.update(1)
+                pbar.close()
+            
+            # Extract short name for user-friendly message
+            short_name = f"{image_base_name}-acido:latest"
+            
+            if not quiet:
+                print(good(f'Successfully pushed {new_image_name}'))
+                print(info(f'You can now use this image with: acido -f myfleet -im {short_name}'))
             
             return new_image_name
 
@@ -1076,7 +1149,7 @@ def main():
     if args.remove:
         acido.rm(args.remove)
     if args.create_image:
-        acido.create_acido_image(args.create_image)
+        acido.create_acido_image(args.create_image, quiet=args.quiet)
 
 if __name__ == "__main__":
     main()
