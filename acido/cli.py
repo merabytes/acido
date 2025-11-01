@@ -156,6 +156,8 @@ class Acido(object):
         self.image_registry_server = None
         self.image_registry_username = None
         self.image_registry_password = None
+        self.docker_username = None
+        self.docker_password = None
         self.storage_account = None
         self.user_assigned = {}
         self.rg = None
@@ -205,6 +207,11 @@ class Acido(object):
             else:
                 # Only for -h or similar cases where config is not needed
                 return
+        
+        # Load Docker Hub credentials from environment (if available)
+        # These are used for pulling base images from Docker Hub
+        self.docker_username = os.getenv('DOCKER_USERNAME')
+        self.docker_password = os.getenv('DOCKER_PASSWORD')
         
 
         # Only try to create identity via Azure CLI if IDENTITY_CLIENT_ID is not already set
@@ -720,6 +727,15 @@ class Acido(object):
     def _detect_distro(self, base_image: str) -> dict:
         """Detect the base OS/distro of the Docker image."""
         print(info(f'Analyzing base image: {base_image}'))
+        
+        # Login to Docker Hub if credentials are available (for private images or rate limiting)
+        if self.docker_username and self.docker_password:
+            print(info('Logging in to Docker Hub...'))
+            login_cmd = f"docker login -u {self.docker_username} -p {self.docker_password}"
+            result = subprocess.run(login_cmd, shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(bad(f'Warning: Failed to login to Docker Hub: {result.stderr}'))
+                print(info('Continuing without Docker Hub authentication...'))
         
         inspect_cmd = f"docker pull {base_image} && docker inspect {base_image}"
         result = subprocess.run(inspect_cmd, shell=True, capture_output=True, text=True)
