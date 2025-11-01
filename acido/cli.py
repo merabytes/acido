@@ -727,7 +727,7 @@ class Acido(object):
         return f"{self.image_registry_server}/{image_name}:{tag}"
 
     def _detect_distro(self, base_image: str) -> dict:
-        """Detect the base OS/distro of the Docker image."""
+        """Detect the base OS/distro of the Docker image by running it and checking package managers."""
         print(info(f'Analyzing base image: {base_image}'))
         
         # Login to Docker Hub if credentials are available (for private images or rate limiting)
@@ -739,35 +739,69 @@ class Acido(object):
                 print(bad(f'Warning: Failed to login to Docker Hub: {result.stderr}'))
                 print(info('Continuing without Docker Hub authentication...'))
         
-        inspect_cmd = f"docker pull {base_image} && docker inspect {base_image}"
-        result = subprocess.run(inspect_cmd, shell=True, capture_output=True, text=True)
+        # Pull the image first
+        pull_cmd = f"docker pull {base_image}"
+        result = subprocess.run(pull_cmd, shell=True, capture_output=True, text=True)
         
         if result.returncode != 0:
-            print(bad(f'Failed to pull/inspect image: {result.stderr}'))
+            print(bad(f'Failed to pull image: {result.stderr}'))
             print(info('Defaulting to Debian-based configuration...'))
             return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
         
-        # Parse JSON output
-        try:
-            inspect_data = json.loads(result.stdout)[0]
+        # Method 1: Check /etc/os-release for distro information
+        print(info('Detecting distro by checking OS release info...'))
+        os_release_cmd = f"docker run --rm --entrypoint '' {base_image} sh -c 'cat /etc/os-release 2>/dev/null || cat /etc/alpine-release 2>/dev/null || echo unknown'"
+        result = subprocess.run(os_release_cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0 and result.stdout:
+            os_info = result.stdout.lower()
             
-            # Check for distro indicators in Config.Env or other metadata
-            env_vars = inspect_data.get('Config', {}).get('Env', [])
+            # Check for Alpine
+            if 'alpine' in os_info:
+                print(good('Detected Alpine Linux'))
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
             
-            # Default to Debian-based
-            distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            # Check for Debian/Ubuntu
+            if 'debian' in os_info or 'ubuntu' in os_info:
+                print(good('Detected Debian/Ubuntu'))
+                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
             
-            # Detect Alpine
-            for env in env_vars:
-                if 'alpine' in env.lower():
-                    distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
-                    break
+            # Check for RHEL/CentOS/Fedora
+            if 'rhel' in os_info or 'centos' in os_info or 'fedora' in os_info or 'red hat' in os_info:
+                print(good('Detected RHEL/CentOS/Fedora'))
+                # Check if dnf or yum is available
+                pkg_check = subprocess.run(
+                    f"docker run --rm --entrypoint '' {base_image} sh -c 'which dnf 2>/dev/null || which yum 2>/dev/null'",
+                    shell=True, capture_output=True, text=True
+                )
+                pkg_manager = 'dnf' if 'dnf' in pkg_check.stdout else 'yum'
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': pkg_manager}
+        
+        # Method 2: Check which package managers are available
+        print(info('Detecting distro by checking available package managers...'))
+        pkg_check_cmd = f"docker run --rm --entrypoint '' {base_image} sh -c 'which apk apt-get yum dnf 2>/dev/null || true'"
+        result = subprocess.run(pkg_check_cmd, shell=True, capture_output=True, text=True)
+        
+        if result.returncode == 0 and result.stdout:
+            pkg_managers = result.stdout.strip()
             
-            return distro_info
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            print(bad(f'Failed to parse image metadata: {e}'))
-            print(info('Defaulting to Debian-based configuration...'))
-            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            # Check in order of specificity
+            if 'apk' in pkg_managers:
+                print(good('Detected Alpine Linux (via apk)'))
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
+            elif 'apt-get' in pkg_managers:
+                print(good('Detected Debian/Ubuntu (via apt-get)'))
+                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            elif 'dnf' in pkg_managers:
+                print(good('Detected Fedora/RHEL (via dnf)'))
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'dnf'}
+            elif 'yum' in pkg_managers:
+                print(good('Detected CentOS/RHEL (via yum)'))
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum'}
+        
+        # Default to Debian if detection fails
+        print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
+        return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
 
     def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
         """Generate Dockerfile content based on distro."""
@@ -778,6 +812,17 @@ class Acido(object):
 RUN apk update && apk add --no-cache python3 py3-pip
 
 RUN python3 -m pip install --break-system-packages acido
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]
+"""
+        elif distro_info['type'] == 'rhel':
+            pkg_manager = distro_info['pkg_manager']
+            return f"""FROM {base_image}
+
+RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip && {pkg_manager} clean all
+
+RUN python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
