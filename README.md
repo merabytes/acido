@@ -70,7 +70,11 @@ paypal.com
 
 2. Create scanning image:
 ```bash
+# Using short name (will look for 'nmap' image)
 acido create nmap
+
+# Or specify the full Docker image URL
+acido create nuclei --image projectdiscovery/nuclei:latest
 ```
 
 3. Run distributed scan:
@@ -107,6 +111,7 @@ usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP]
 positional arguments:
   {create}              Subcommands
     create              Create acido-compatible image from base image
+                        Usage: acido create <name> [--image <full-image-url>]
 
 optional arguments:
   -h, --help            Show help message

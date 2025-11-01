@@ -70,6 +70,7 @@ jobs:
     - name: Test CLI help
       run: |
         python -m acido.cli --help
+        python -m acido.cli create --help
 
     - name: Run Python syntax check
       run: |
@@ -136,9 +137,9 @@ jobs:
         DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       run: |
-        # This will test that acido can create a nuclei image
+        # This will test that acido can create a nuclei image using the correct Docker image
         # It will use environment variables for configuration
-        acido create nuclei || echo "Note: Image creation may fail without proper credentials, but command should execute"
+        acido create nuclei --image projectdiscovery/nuclei:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
 
   lint:
     name: Code Quality Checks
