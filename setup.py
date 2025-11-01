@@ -17,7 +17,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 setup(
     name='acido',
     packages=['acido', 'acido.azure_utils', 'acido.utils'],
-    version='0.17',
+    version='0.18',
     description='Azure Container Instance Distributed Operations',
     long_description=readme,
     long_description_content_type='text/markdown',
@@ -38,6 +38,11 @@ setup(
         'msrestazure',
         'beaupy==3.8.2'
     ],
+    entry_points={
+        'console_scripts': [
+            'acido=acido.cli:main',
+        ],
+    },
     keywords=[
         'Security',
         'Cloud Computing',

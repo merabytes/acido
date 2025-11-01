@@ -1,6 +1,39 @@
-# acido (0.17)
+# acido (0.18)
 
 **The distributed security scanning framework built for speed and scale.**
+
+## Table of Contents
+
+- [Why Acido?](#why-acido)
+  - [Scan Faster, Find More](#scan-faster-find-more)
+  - [Built for Security Professionals](#built-for-security-professionals)
+  - [Cost-Effective Cloud Scaling](#cost-effective-cloud-scaling)
+  - [Works with Your Favorite Tools](#works-with-your-favorite-tools)
+  - [How It Works](#how-it-works)
+  - [Open Source + Enterprise](#open-source--enterprise)
+- [CLI Reference](#cli-reference)
+- [Quick Start Example: Distributed Nmap Scanning](#quick-start-example-distributed-nmap-scanning)
+- [More Real-World Examples](#more-real-world-examples)
+  - [Nuclei: Distributed Vulnerability Scanning](#nuclei-distributed-vulnerability-scanning)
+  - [Masscan: Ultra-Fast Port Discovery](#masscan-ultra-fast-port-discovery)
+  - [Screenshots: Visual Reconnaissance](#screenshots-visual-reconnaissance)
+- [Key Benefits for Security Professionals](#key-benefits-for-security-professionals)
+  - [Speed & Scale That Matters](#speed--scale-that-matters)
+  - [Enterprise-Grade Security Features](#enterprise-grade-security-features)
+  - [Flexible & Extensible](#flexible--extensible)
+  - [Perfect For](#perfect-for)
+- [Installation & Setup](#installation--setup)
+  - [Prerequisites](#prerequisites)
+  - [Troubleshooting](#troubleshooting)
+- [Architecture](#architecture)
+  - [Internal Architecture Overview](#internal-architecture-overview)
+  - [Core Components](#core-components)
+  - [How It Works](#how-it-works-1)
+  - [Data Flow Summary](#data-flow-summary)
+  - [Component Details](#component-details)
+  - [Traffic Routing for Security Audits](#traffic-routing-for-security-audits)
+- [Upcoming Features](#upcoming-features)
+- [Credits / Acknowledgements](#credits--acknowledgements)
 
 Acido (**A**zure **C**ontainer **I**nstance **D**istributed **O**perations) is a powerful framework designed specifically for **bug bounty hunters**, **penetration testers**, and **red team operators** who need to scan at massive scale without sacrificing speed.
 
@@ -51,9 +84,6 @@ Acido supports any security tool that can be containerized:
 Inspired by [axiom](https://github.com/pry0cc/axiom), acido brings distributed security scanning to Azure with enterprise-grade security features and seamless cloud integration.
 
 **Note**: Depending on your Azure quota limits, you may need to request container group limit increases through Azure support.
-
-### Add an alias for convenience (.bashrc / .zshrc):
-    alias acido='python3 -m acido.cli'
 
 ## CLI Reference
 
@@ -267,7 +297,6 @@ acido -f screenshot-scan \
 
 ### Step 2: Install acido and configure Azure credentials
     pip install acido
-    python3 -m acido.cli -c
     $ acido -c
     [+] Selecting I/O storage account (acido).
     [!] Please provide a Resource Group Name to deploy the ACIs: Merabytes
