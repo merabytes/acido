@@ -85,7 +85,7 @@ class InstanceManager(ManagedAuthentication):
         instance_number: int = 3, max_ram: int = 16, 
         max_cpu: int = 4, image_name: str =None,
         env_vars: dict = {}, command: str = None,
-        input_files: list = None
+        input_files: list = None, quiet: bool = False
     ):
         restart_policies = ["Always", "OnFailure", "Never"]
         if restart_policy not in restart_policies:
@@ -174,7 +174,8 @@ class InstanceManager(ManagedAuthentication):
                 results[f'{name}-{i_num:02d}'] = ok
         except HttpResponseError as e:
             ok = False
-            print(bad(str(e)))
+            if not quiet:
+                print(bad(str(e)))
             raise e
 
         self.env_vars.clear()

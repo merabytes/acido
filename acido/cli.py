@@ -21,6 +21,7 @@ import time
 from os import mkdir
 from acido.utils.decoration import BANNER, __version__
 from acido.utils.shell_utils import wait_command, exec_command
+from tqdm import tqdm
 
 __author__ = "Xavier Alvarez Delgado (xalvarez@merabytes.com)"
 __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
@@ -100,8 +101,14 @@ parser.add_argument("-d", "--download",
                     action='store')
 parser.add_argument("-o", "--output",
                     dest="write_to_file",
-                    help="Save the output of the machines in JSON format.",
+                    help="Save the output to a file. If not specified, outputs to STDOUT.",
                     action='store')
+parser.add_argument("--format",
+                    dest="output_format",
+                    help="Output format: 'txt' (merged text) or 'json' (JSON with per-container outputs). Default: txt",
+                    action='store',
+                    choices=['txt', 'json'],
+                    default='txt')
 parser.add_argument("-rwd", "--rm-when-done",
                     dest="rm_when_done",
                     help="Remove the container groups after finish.",
@@ -333,16 +340,22 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, interactive=True):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False):
         response = {}
         input_files = None
+        
+        # Helper function to print only if not quiet
+        def print_if_not_quiet(msg):
+            if not quiet:
+                print(msg)
+        
         if instance_num > 10:
             instance_num_groups = list(chunks(range(1, instance_num + 1), 10))
             
             if input_file:
                 input_filenames = split_file(input_file, instance_num)
                 input_files = [self.save_input(f) for f in input_filenames]
-                print(good(f'Uploaded {len(input_files)} target lists.'))
+                print_if_not_quiet(good(f'Uploaded {len(input_files)} target lists.'))
 
             for cg_n, ins_num in enumerate(instance_num_groups):
                 last_instance = len(ins_num)
@@ -371,7 +384,8 @@ class Acido(object):
                             input_files=input_files,
                             command=scan_cmd,
                             network_profile=self.network_profile,
-                            env_vars=env_vars)
+                            env_vars=env_vars,
+                            quiet=quiet)
         else:
 
             if input_file:
@@ -399,7 +413,8 @@ class Acido(object):
                 command=scan_cmd,
                 env_vars=env_vars,
                 network_profile=self.network_profile,
-                input_files=input_files)
+                input_files=input_files,
+                quiet=quiet)
         
         os.system('rm -f /tmp/acido-input*')
 
@@ -412,13 +427,22 @@ class Acido(object):
             all_groups.append(cg)
             all_names += list(containers.keys())
 
-        print(good(f"Successfully created new group/s: [ {bold(' '.join(all_groups))} ]"))
-        print(good(f"Successfully created new instance/s: [ {bold(' '.join(all_names))} ]"))
+        print_if_not_quiet(good(f"Successfully created new group/s: [ {bold(' '.join(all_groups))} ]"))
+        print_if_not_quiet(good(f"Successfully created new instance/s: [ {bold(' '.join(all_names))} ]"))
 
         if scan_cmd:
-            print(good('Waiting 1 minute until the container/s group/s gets provisioned...'))
-            time.sleep(60)
-            print(good('Waiting for outputs...'))
+            if quiet:
+                # Use progress bar when quiet mode
+                pbar = tqdm(total=3, desc="Fleet execution", unit="step")
+                pbar.set_description("Provisioning containers")
+                time.sleep(60)
+                pbar.update(1)
+                
+                pbar.set_description("Executing commands")
+            else:
+                print(good('Waiting 1 minute until the container/s group/s gets provisioned...'))
+                time.sleep(60)
+                print(good('Waiting for outputs...'))
 
             for cg, containers in response.items():
                 for cont in list(containers.keys()):
@@ -428,21 +452,43 @@ class Acido(object):
                     results.append(result)
 
             results = [result.wait() for result in results]
+            
+            if quiet:
+                pbar.update(1)
+                pbar.set_description("Collecting outputs")
 
             for c, o in instances_outputs.items():
                 command_uuid, exception = o
                 if command_uuid:
                     output = self.load_input(command_uuid)
-                    print(good(f'Executed command on {bold(c)}. Output: [\n{output.decode().strip()}\n]'))
+                    if not quiet:
+                        print(good(f'Executed command on {bold(c)}. Output: [\n{output.decode().strip()}\n]'))
                     outputs[c] = output.decode()
                 elif exception:
-                    print(bad(f'Executed command on {bold(c)} Output: [\n{exception}\n]'))
+                    if not quiet:
+                        print(bad(f'Executed command on {bold(c)} Output: [\n{exception}\n]'))
             
+            if quiet:
+                pbar.update(1)
+                pbar.close()
+            
+            # Handle output
             if write_to_file:
-                open(write_to_file, 'w').write(json.dumps(outputs, indent=4))
-                print(good(f'Saved container outputs at: {write_to_file}.json'))
-                open(f'all_{write_to_file}.txt', 'w').write('\n'.join([o.rstrip() for o in outputs.values()]))
-                print(good(f'Saved merged outputs at: all_{write_to_file}.txt'))
+                # Save to file
+                if output_format == 'json':
+                    with open(write_to_file, 'w') as f:
+                        f.write(json.dumps(outputs, indent=4))
+                    print_if_not_quiet(good(f'Saved container outputs at: {write_to_file}'))
+                else:  # txt format
+                    with open(write_to_file, 'w') as f:
+                        f.write('\n'.join([o.rstrip() for o in outputs.values()]))
+                    print_if_not_quiet(good(f'Saved merged outputs at: {write_to_file}'))
+            else:
+                # Output to STDOUT
+                if output_format == 'json':
+                    print(json.dumps(outputs, indent=4))
+                else:  # txt format
+                    print('\n'.join([o.rstrip() for o in outputs.values()]))
 
         return None if interactive else response, outputs
     
@@ -818,6 +864,8 @@ def main():
         args.num_instances = int(args.num_instances) if args.num_instances else 1
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, args.image_tag)
+        # Use quiet mode (progress bar) when executing fleet without interactive mode
+        quiet = not args.interactive and args.task is not None
         acido.fleet(
             fleet_name=args.fleet, 
             instance_num=int(args.num_instances) if args.num_instances else 1, 
@@ -826,7 +874,9 @@ def main():
             input_file=args.input_file, 
             wait=int(args.wait) if args.wait else None, 
             write_to_file=args.write_to_file,
-            interactive=bool(args.interactive)
+            output_format=args.output_format,
+            interactive=bool(args.interactive),
+            quiet=quiet
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')

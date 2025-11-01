@@ -36,7 +36,8 @@ setup(
         'websockets',
         'huepy',
         'msrestazure',
-        'beaupy==3.8.2'
+        'beaupy==3.8.2',
+        'tqdm'
     ],
     entry_points={
         'console_scripts': [
