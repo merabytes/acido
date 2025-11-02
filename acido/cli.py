@@ -406,9 +406,13 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None):
         response = {}
         input_files = None
+        
+        # Create pool if not provided
+        if pool is None:
+            pool = ThreadPoolShim(processes=30)
         
         # Helper function to print only if not quiet
         def print_if_not_quiet(msg):
@@ -611,11 +615,16 @@ class Acido(object):
                 print(good(f'File loaded successfully.'))
         return input_file
 
-    def exec(self, command, max_retries=60, input_file: str = None, write_to_file: str =None):
+    def exec(self, command, max_retries=60, input_file: str = None, write_to_file: str =None, pool=None):
         global instances_outputs
         self.all_instances, self.instances_named = self.ls(interactive=False)
         results = []
         executed = False
+        
+        # Create pool if not provided
+        if pool is None:
+            pool = ThreadPoolShim(processes=30)
+        
         if not self.selected_instances:
             print(bad('You didn\'t select any containers to execute the command.'))
             return
@@ -1147,7 +1156,6 @@ def main():
     if args.download_input:
         acido.load_input(args.download_input, write_to_file=True)
     if args.fleet:
-        pool = ThreadPoolShim(processes=30)
         args.num_instances = int(args.num_instances) if args.num_instances else 1
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, args.image_tag)
@@ -1168,7 +1176,6 @@ def main():
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:
-        pool = ThreadPoolShim(processes=30)
         acido.exec(
             command=args.exec_cmd, 
             max_retries=int(args.wait) if args.wait else 60, 
