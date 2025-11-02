@@ -54,7 +54,9 @@ def wait_command(rg, cg, cont, wait=None, instance_manager=None):
             exception = 'TIMEOUT REACHED'
             break
         if 'command: ' in container_logs:
-            command_uuid = container_logs.split('command: ')[1].strip()
+            parts = container_logs.split('command: ', 1)
+            if len(parts) > 1:
+                command_uuid = parts[1].strip()
             break
         if 'Exception' in container_logs:
             exception = container_logs

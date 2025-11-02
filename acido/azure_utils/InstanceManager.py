@@ -277,14 +277,11 @@ class InstanceManager(ManagedAuthentication):
         Raises:
             HttpResponseError: If there's an error retrieving logs
         """
-        try:
-            logs = self._client.containers.list_logs(
-                resource_group_name=self.resource_group,
-                container_group_name=container_group_name,
-                container_name=container_name,
-                tail=tail,
-                timestamps=timestamps
-            )
-            return logs.content
-        except HttpResponseError as e:
-            raise e
+        logs = self._client.containers.list_logs(
+            resource_group_name=self.resource_group,
+            container_group_name=container_group_name,
+            container_name=container_name,
+            tail=tail,
+            timestamps=timestamps
+        )
+        return logs.content
