@@ -73,7 +73,7 @@ The Lambda function accepts JSON events with the following structure:
 
 ```json
 {
-  "image": "nmap",
+  "image": "kali-rolling",
   "targets": ["merabytes.com", "uber.com", "facebook.com"],
   "task": "nmap -iL input -p 0-1000"
 }
@@ -84,7 +84,7 @@ Or with a body wrapper (e.g., from API Gateway):
 ```json
 {
   "body": {
-    "image": "nmap",
+    "image": "kali-rolling",
     "targets": ["merabytes.com", "uber.com", "facebook.com"],
     "task": "nmap -iL input -p 0-1000"
   }
@@ -93,7 +93,7 @@ Or with a body wrapper (e.g., from API Gateway):
 
 ### Parameters
 
-- **image** (required): Name of the Docker image to use (e.g., "nmap", "nuclei")
+- **image** (required): Name of the Docker image to use (e.g., "kali-rolling", "nuclei")
 - **targets** (required): Array of target URLs/IPs to scan
 - **task** (required): Command to execute (use "input" as the filename placeholder)
 - **fleet_name** (optional): Name for the container fleet (default: "lambda-fleet")
@@ -109,7 +109,7 @@ Success response (200):
   "body": {
     "fleet_name": "lambda-fleet",
     "instances": 3,
-    "image": "nmap",
+    "image": "kali-rolling",
     "outputs": {
       "container-1": "scan output...",
       "container-2": "scan output...",

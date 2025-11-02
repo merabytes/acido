@@ -1,5 +1,5 @@
 {
-  "image": "nmap",
+  "image": "kali-rolling",
   "targets": [
     "merabytes.com",
     "uber.com",

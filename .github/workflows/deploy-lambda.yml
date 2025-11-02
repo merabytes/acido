@@ -98,7 +98,7 @@ jobs:
           --query 'Configuration.[FunctionName,LastModified,State,ImageUri]' \
           --output table
 
-    - name: Test Lambda Function URL
+    - name: Launch Kali Nmap Test on Deployed Lambda
       if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
       env:
         LAMBDA_FUNCTION_URL: ${{ secrets.LAMBDA_FUNCTION_URL }}
