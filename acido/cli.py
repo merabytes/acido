@@ -785,7 +785,7 @@ class Acido(object):
                 print(bad(f'Invalid Docker image name: {base_image}'))
                 print(info('Image names should only contain alphanumeric characters, dots, hyphens, underscores, colons, and slashes.'))
                 print(info('Defaulting to Debian-based configuration...'))
-            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
         
         # Login to Docker Hub if credentials are available (for private images or rate limiting)
         if self.docker_username and self.docker_password:
@@ -810,7 +810,7 @@ class Acido(object):
             if not quiet:
                 print(bad(f'Failed to pull image: {result.stderr}'))
                 print(info('Defaulting to Debian-based configuration...'))
-            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+            return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
         
         # Method 1: Check /etc/os-release for distro information
         if not quiet:
@@ -828,13 +828,13 @@ class Acido(object):
             if 'alpine' in os_info:
                 if not quiet:
                     print(good('Detected Alpine Linux'))
-                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
             
-            # Check for Debian/Ubuntu
-            if 'debian' in os_info or 'ubuntu' in os_info:
+            # Check for Debian/Ubuntu/Kali
+            if 'debian' in os_info or 'ubuntu' in os_info or 'kali' in os_info:
                 if not quiet:
-                    print(good('Detected Debian/Ubuntu'))
-                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+                    print(good('Detected Debian/Ubuntu/Kali'))
+                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
             
             # Check for RHEL/CentOS/Fedora
             if 'rhel' in os_info or 'centos' in os_info or 'fedora' in os_info or 'red hat' in os_info:
@@ -847,7 +847,7 @@ class Acido(object):
                     capture_output=True, text=True
                 )
                 pkg_manager = 'dnf' if 'dnf' in pkg_check.stdout else 'yum'
-                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': pkg_manager}
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': pkg_manager, 'needs_break_packages': False}
         
         # Method 2: Check which package managers are available
         if not quiet:
@@ -865,24 +865,24 @@ class Acido(object):
             if 'apk' in pkg_managers:
                 if not quiet:
                     print(good('Detected Alpine Linux (via apk)'))
-                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk'}
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
             elif 'apt-get' in pkg_managers:
                 if not quiet:
                     print(good('Detected Debian/Ubuntu (via apt-get)'))
-                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+                return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
             elif 'dnf' in pkg_managers:
                 if not quiet:
                     print(good('Detected Fedora/RHEL (via dnf)'))
-                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'dnf'}
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'dnf', 'needs_break_packages': False}
             elif 'yum' in pkg_managers:
                 if not quiet:
                     print(good('Detected CentOS/RHEL (via yum)'))
-                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum'}
+                return {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum', 'needs_break_packages': False}
         
         # Default to Debian if detection fails
         if not quiet:
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
-        return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get'}
+        return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
     def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
         """Generate Dockerfile content based on distro."""
@@ -916,13 +916,15 @@ ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
         else:  # Debian/Ubuntu-based
+            # Check if we need --break-system-packages flag
+            pip_flags = ' --break-system-packages' if distro_info.get('needs_break_packages', False) else ''
             return f"""FROM {base_image}
 
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 
 # Install acido (psutil will build from source)
-RUN python3 -m pip install acido
+RUN python3 -m pip install{pip_flags} acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
