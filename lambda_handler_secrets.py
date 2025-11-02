@@ -55,10 +55,14 @@ def _handle_create_secret(event, vault_manager):
     # Generate UUID for the secret
     secret_uuid = str(uuid.uuid4())
     
+    # Track whether the secret is encrypted
+    is_encrypted_flag = False
+    
     # Encrypt secret if password is provided
     if password:
         try:
             secret_value = encrypt_secret(secret_value, password)
+            is_encrypted_flag = True
         except Exception as e:
             return build_response(500, {
                 'error': f'Encryption failed: {str(e)}'
@@ -66,6 +70,11 @@ def _handle_create_secret(event, vault_manager):
     
     # Store secret in Key Vault
     vault_manager.set_secret(secret_uuid, secret_value)
+    
+    # Store encryption metadata as a separate secret
+    # Using a naming convention: {uuid}-metadata
+    metadata_key = f"{secret_uuid}-metadata"
+    vault_manager.set_secret(metadata_key, "encrypted" if is_encrypted_flag else "plaintext")
     
     # Return success response with UUID
     return build_response(201, {
@@ -91,22 +100,52 @@ def _handle_retrieve_secret(event, vault_manager):
             'error': 'Secret not found or already accessed'
         }, CORS_HEADERS)
     
+    # Check metadata to determine if secret is encrypted
+    metadata_key = f"{secret_uuid}-metadata"
+    try:
+        metadata_value = vault_manager.get_secret(metadata_key)
+        is_encrypted_secret = (metadata_value == "encrypted")
+    except Exception:
+        # If metadata doesn't exist, fall back to heuristic check for backward compatibility
+        secret_value = vault_manager.get_secret(secret_uuid)
+        is_encrypted_secret = is_encrypted(secret_value)
+    
     # Retrieve the secret value
     secret_value = vault_manager.get_secret(secret_uuid)
     
-    # Decrypt secret if password is provided
-    if password:
+    # Decrypt secret if it's encrypted
+    if is_encrypted_secret:
+        if not password:
+            # Delete both secret and metadata
+            vault_manager.delete_secret(secret_uuid)
+            try:
+                vault_manager.delete_secret(metadata_key)
+            except Exception:
+                pass
+            return build_response(400, {
+                'error': 'Password required for encrypted secret'
+            }, CORS_HEADERS)
+        
         try:
             secret_value = decrypt_secret(secret_value, password)
         except ValueError as e:
-            # Delete the secret even if decryption fails
+            # Delete the secret and metadata even if decryption fails
             vault_manager.delete_secret(secret_uuid)
+            try:
+                vault_manager.delete_secret(metadata_key)
+            except Exception:
+                pass
             return build_response(400, {
                 'error': f'Decryption failed: {str(e)}'
             }, CORS_HEADERS)
     
-    # Delete the secret (one-time access)
+    # Delete the secret and metadata (one-time access)
     vault_manager.delete_secret(secret_uuid)
+    try:
+        vault_manager.delete_secret(metadata_key)
+    except Exception:
+        # Metadata might not exist for old secrets
+        pass
     
     # Return success response with secret value
     return build_response(200, {
@@ -131,11 +170,15 @@ def _handle_check_secret(event, vault_manager):
             'error': 'Secret not found or already accessed'
         }, CORS_HEADERS)
     
-    # Retrieve the secret value (without deleting)
-    secret_value = vault_manager.get_secret(secret_uuid)
-    
-    # Check if the secret is encrypted
-    encrypted = is_encrypted(secret_value)
+    # Check metadata to determine if secret is encrypted (bulletproof method)
+    metadata_key = f"{secret_uuid}-metadata"
+    try:
+        metadata_value = vault_manager.get_secret(metadata_key)
+        encrypted = (metadata_value == "encrypted")
+    except Exception:
+        # If metadata doesn't exist, fall back to heuristic check for backward compatibility
+        secret_value = vault_manager.get_secret(secret_uuid)
+        encrypted = is_encrypted(secret_value)
     
     # Return check result
     return build_response(200, {

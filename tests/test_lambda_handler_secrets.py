@@ -102,7 +102,11 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertEqual(body['uuid'], 'test-uuid-1234')
         self.assertIn('created successfully', body['message'])
-        mock_vault_manager.set_secret.assert_called_once_with('test-uuid-1234', 'my-secret-value')
+        
+        # Verify both secret and metadata were stored
+        self.assertEqual(mock_vault_manager.set_secret.call_count, 2)
+        mock_vault_manager.set_secret.assert_any_call('test-uuid-1234', 'my-secret-value')
+        mock_vault_manager.set_secret.assert_any_call('test-uuid-1234-metadata', 'plaintext')
 
     @patch('lambda_handler_secrets.VaultManager')
     def test_create_secret_missing_secret(self, mock_vault_manager_class):
@@ -134,7 +138,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
-        mock_vault_manager.get_secret.return_value = 'my-secret-value'
+        
+        # Mock get_secret to return metadata and then the actual secret
+        def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-metadata':
+                return 'plaintext'
+            return 'my-secret-value'
+        
+        mock_vault_manager.get_secret.side_effect = get_secret_side_effect
         
         event = {
             'action': 'retrieve',
@@ -151,8 +162,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertEqual(body['secret'], 'my-secret-value')
         self.assertIn('retrieved and deleted', body['message'])
         mock_vault_manager.secret_exists.assert_called_once_with('test-uuid-1234')
-        mock_vault_manager.get_secret.assert_called_once_with('test-uuid-1234')
-        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+        
+        # Verify both secret and metadata were accessed and deleted
+        self.assertEqual(mock_vault_manager.get_secret.call_count, 2)
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
@@ -297,7 +310,11 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Verify
         self.assertEqual(response['statusCode'], 201)
         mock_validate.assert_called_once()
-        mock_vault_manager.set_secret.assert_called_once_with('test-uuid-1234', 'my-secret-value')
+        
+        # Verify both secret and metadata were stored
+        self.assertEqual(mock_vault_manager.set_secret.call_count, 2)
+        mock_vault_manager.set_secret.assert_any_call('test-uuid-1234', 'my-secret-value')
+        mock_vault_manager.set_secret.assert_any_call('test-uuid-1234-metadata', 'plaintext')
         
         # Clean up
         del os.environ['CF_SECRET_KEY']
@@ -365,7 +382,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
-        mock_vault_manager.get_secret.return_value = 'my-secret-value'
+        
+        # Mock get_secret to return metadata and then the actual secret
+        def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-metadata':
+                return 'plaintext'
+            return 'my-secret-value'
+        
+        mock_vault_manager.get_secret.side_effect = get_secret_side_effect
         
         event = {
             'action': 'retrieve',
@@ -379,8 +403,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Verify
         self.assertEqual(response['statusCode'], 200)
         mock_validate.assert_called_once()
-        mock_vault_manager.get_secret.assert_called_once_with('test-uuid-1234')
-        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+        
+        # Verify both secret and metadata were accessed and deleted
+        self.assertEqual(mock_vault_manager.get_secret.call_count, 2)
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
         
         # Clean up
         del os.environ['CF_SECRET_KEY']
@@ -486,9 +512,12 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertEqual(body['uuid'], 'test-uuid-1234')
         self.assertIn('created successfully', body['message'])
         
-        # Verify that set_secret was called with encrypted value (not plaintext)
-        mock_vault_manager.set_secret.assert_called_once()
-        stored_value = mock_vault_manager.set_secret.call_args[0][1]
+        # Verify that set_secret was called twice (secret + metadata)
+        self.assertEqual(mock_vault_manager.set_secret.call_count, 2)
+        
+        # Verify secret value is encrypted (not plaintext)
+        secret_call = [call for call in mock_vault_manager.set_secret.call_args_list if 'metadata' not in str(call)][0]
+        stored_value = secret_call[0][1]
         self.assertNotEqual(stored_value, 'my-secret-value')  # Should be encrypted
 
     @patch('lambda_handler_secrets.validate_turnstile')
@@ -505,7 +534,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         
         # Encrypt a secret with password
         encrypted_value = encrypt_secret('my-secret-value', 'test-password')
-        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        # Mock get_secret to return metadata and then the actual encrypted secret
+        def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-metadata':
+                return 'encrypted'
+            return encrypted_value
+        
+        mock_vault_manager.get_secret.side_effect = get_secret_side_effect
         
         event = {
             'action': 'retrieve',
@@ -522,7 +558,9 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertEqual(body['secret'], 'my-secret-value')
         self.assertIn('retrieved and deleted', body['message'])
-        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+        
+        # Verify both secret and metadata were deleted
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
@@ -538,7 +576,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         
         # Encrypt a secret with password
         encrypted_value = encrypt_secret('my-secret-value', 'correct-password')
-        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        # Mock get_secret to return metadata and then the actual encrypted secret
+        def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-metadata':
+                return 'encrypted'
+            return encrypted_value
+        
+        mock_vault_manager.get_secret.side_effect = get_secret_side_effect
         
         event = {
             'action': 'retrieve',
@@ -555,8 +600,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertIn('error', body)
         self.assertIn('Decryption failed', body['error'])
-        # Secret should still be deleted even if decryption fails
-        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+        # Secret and metadata should both be deleted even if decryption fails
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
@@ -585,8 +630,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertEqual(body['uuid'], 'test-uuid-1234')
         
-        # Verify that secret was stored as plaintext (not encrypted)
-        mock_vault_manager.set_secret.assert_called_once_with('test-uuid-1234', 'my-secret-value')
+        # Verify both secret and metadata were stored
+        self.assertEqual(mock_vault_manager.set_secret.call_count, 2)
+        mock_vault_manager.set_secret.assert_any_call('test-uuid-1234', 'my-secret-value')
+        mock_vault_manager.set_secret.assert_any_call('test-uuid-1234-metadata', 'plaintext')
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
@@ -597,7 +644,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
-        mock_vault_manager.get_secret.return_value = 'my-secret-value'  # Plaintext
+        
+        # Mock get_secret to return metadata and then the actual secret
+        def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-metadata':
+                return 'plaintext'
+            return 'my-secret-value'
+        
+        mock_vault_manager.get_secret.side_effect = get_secret_side_effect
         
         event = {
             'action': 'retrieve',
@@ -732,7 +786,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
-        mock_vault_manager.get_secret.return_value = 'my-secret-value'
+        
+        # Mock get_secret to return metadata and then the actual secret
+        def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-metadata':
+                return 'plaintext'
+            return 'my-secret-value'
+        
+        mock_vault_manager.get_secret.side_effect = get_secret_side_effect
         
         # Test without turnstile token - should fail
         event = {
@@ -760,17 +821,14 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
     @patch('lambda_handler_secrets.VaultManager')
     def test_check_secret_encrypted(self, mock_vault_manager_class, mock_validate):
         """Test checking if a secret is encrypted."""
-        from acido.utils.crypto_utils import encrypt_secret
-        
         # Setup mocks
         mock_validate.return_value = True
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
         
-        # Store an encrypted secret
-        encrypted_value = encrypt_secret('my-secret-value', 'test-password')
-        mock_vault_manager.get_secret.return_value = encrypted_value
+        # Mock metadata to indicate encrypted secret
+        mock_vault_manager.get_secret.return_value = 'encrypted'
         
         event = {
             'action': 'check',
@@ -800,8 +858,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
         
-        # Store a plaintext secret
-        mock_vault_manager.get_secret.return_value = 'plaintext-secret'
+        # Mock metadata to indicate plaintext secret
+        mock_vault_manager.get_secret.return_value = 'plaintext'
         
         event = {
             'action': 'check',
