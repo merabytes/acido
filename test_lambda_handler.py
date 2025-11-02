@@ -35,6 +35,7 @@ class TestLambdaHandler(unittest.TestCase):
         os.environ['IMAGE_REGISTRY_USERNAME'] = 'test-user'
         os.environ['IMAGE_REGISTRY_PASSWORD'] = 'test-pass'
         os.environ['STORAGE_ACCOUNT_NAME'] = 'testaccount'
+        os.environ['STORAGE_ACCOUNT_KEY'] = 'test-storage-key'
 
     def test_missing_body(self):
         """Test handler with missing body."""

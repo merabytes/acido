@@ -42,6 +42,7 @@ def lambda_handler(event, context):
     - IMAGE_REGISTRY_USERNAME
     - IMAGE_REGISTRY_PASSWORD
     - STORAGE_ACCOUNT_NAME
+    - STORAGE_ACCOUNT_KEY (optional, if not provided will use Azure SDK to fetch)
     
     Returns:
         dict: Response with statusCode and body containing fleet outputs

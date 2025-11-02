@@ -23,6 +23,16 @@ class BlobManager(ManagedAuthentication):
         account_key: str = None,
         conn_str: str = None,
     ):  
+        # Prioritize environment variables for account name and key (same as acido -c)
+        env_account_name = os.getenv('STORAGE_ACCOUNT_NAME', None)
+        env_account_key = os.getenv('STORAGE_ACCOUNT_KEY', None)
+        
+        # Use environment variables if available, otherwise use passed parameters
+        if env_account_name:
+            account_name = env_account_name
+        if env_account_key:
+            account_key = env_account_key
+        
         conn_str = os.getenv('BLOB_CONNECTION', None)
         if account_name and account_key:
             self.service_client = BlobManager.auth(account_name, account_key)
