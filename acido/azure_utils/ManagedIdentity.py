@@ -30,11 +30,12 @@ class ManagedAuthentication:
     def client_id(self) -> str:
         return _os.getenv("MANAGED_IDENTITY_CLIENT_ID")
 
-    def get_credential(self, resource):
+    def get_credential(self):
         drivers = {
             "cloud": [
                 self.get_environment_credential,
-                self.get_managed_credential
+                self.get_managed_credential,
+                self.get_cli_credential
             ],
             "local": [
                 self.get_environment_credential,
@@ -42,28 +43,37 @@ class ManagedAuthentication:
                 self.get_client_secret_credential
             ]
         }
-        
-        driver_list = "local"
 
-        if self.is_cloud():
-            driver_list = "cloud"
+        driver_list = "cloud" if self.is_cloud() else "local"
 
-        if hasattr(self, "check_access"):
-            ok = False
-            for driver in drivers[driver_list]:
-                credential = driver(resource)
-                if not credential:
+        def credential_works(cred) -> bool:
+            try:
+                # ARM scope is a lightweight sanity check
+                cred.get_token(_as_scope(Resources._msi["instance"]))
+                return True
+            except Exception:
+                return False
+
+        # If a check_access hook exists, use it to validate the client as well.
+        for driver in drivers[driver_list]:
+            cred = driver()
+            if not cred:
+                continue
+            if hasattr(self, "check_access"):
+                try:
+                    client = self.get_client(cred)
+                    if self.check_access(client):
+                        return cred
+                except Exception:
                     continue
-                client = self.get_client(credential)
-                if self.check_access(client):
-                    ok = True
-                    return credential
-            if not ok:
-                print("No permissions granted for the given credentials.")
-        else:
-            return drivers[driver_list][0](resource)
+            else:
+                if credential_works(cred):
+                    return cred
 
-    def get_managed_credential(self, resource):
+        print("No permissions granted for the available credentials.")
+        return None
+
+    def get_managed_credential(self):
         return self._get_managed_identity_credential()
 
     def _get_managed_identity_credential(self):
@@ -71,15 +81,14 @@ class ManagedAuthentication:
             client_id=self.client_id
         )
 
-    def get_cli_credential(self, resource):
+    def get_cli_credential(self):
         try:
-            cred = AzureCliCredential()
+            return AzureCliCredential()
         except Exception:
             # Silently return None to allow fallback to other credential methods
             return None
-        return cred
 
-    def get_client_secret_credential(self, resource):
+    def get_client_secret_credential(self):
         tenant_id = input("Enter TENANT_ID: ")
         client_id = input("Enter CLIENT_ID: ")
         client_secret = getpass.getpass("Enter CLIENT_SECRET: ")
@@ -89,32 +98,26 @@ class ManagedAuthentication:
             client_secret=client_secret
         )
 
-    def get_environment_credential(self, resource):
-        if self._environment_ok() is False:
-            return False
+    def get_environment_credential(self):
+        if not self._environment_ok():
+            return None
         return azure.identity.EnvironmentCredential()
 
     def _environment_ok(self):
         checks = ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"]
-        for check in checks:
-            if check not in _os.environ:
-                return False
-        return True
+        return all(check in _os.environ for check in checks)
 
     def is_cloud(self):
         force = "INSTANCE_NAME" in _os.environ
-        auto = "MSI_ENDPOINT" in _os.environ
-        auto = auto or "MSI_SECRET" in _os.environ
+        auto = "MSI_ENDPOINT" in _os.environ or "MSI_SECRET" in _os.environ
         return force or auto
 
     def extract_subscription(self, credential):
-
         # 1) Azure CLI: list subscriptions directly
-        if isinstance(credential, AzureCliCredential):
+        if isinstance(credential, (AzureCliCredential, azure.identity._credentials.azure_cli.AzureCliCredential)):
             try:
                 subs = SubscriptionClient(credential).subscriptions.list()
                 first = next(iter(subs))
-                # `subscription_id` is already the GUID you want
                 return first.subscription_id
             except StopIteration:
                 print(bad("No subscriptions found for the current Azure CLI context."))
@@ -165,6 +168,9 @@ class ManagedAuthentication:
                 pass
             print(bad("Unable to resolve subscription id. Ensure the credential has ARM access or run az login."))
             sys.exit(1)
+        
+        import code
+        code.interact(local=locals())
 
         # 4) No credential available
         print(bad("Please run az login or provide valid credentials."))

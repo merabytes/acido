@@ -9,7 +9,7 @@ from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IP
 from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from acido.azure_utils.BlobManager import BlobManager
-from acido.azure_utils.InstanceManager import InstanceManager, Resources
+from acido.azure_utils.InstanceManager import InstanceManager
 from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
 from acido.utils.functions import chunks, jpath, expanduser, split_file
 from acido.utils.lambda_safe_pool import ThreadPoolShim
@@ -689,7 +689,7 @@ class Acido(object):
         
         if not os.getenv('STORAGE_ACCOUNT_NAME', None):
             auth = ManagedAuthentication()
-            credential = auth.get_credential(Resources.BLOB)
+            credential = auth.get_credential()
             subscription = auth.extract_subscription(credential)
             client = StorageManagementClient(
                 credential,

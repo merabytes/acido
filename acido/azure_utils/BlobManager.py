@@ -2,7 +2,7 @@ from azure.storage.blob import BlobServiceClient
 from uuid import uuid4 as uuid
 from azure.core.exceptions import ResourceNotFoundError
 from azure.mgmt.storage import StorageManagementClient
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
+from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from huepy import good, bad, info
 
 
@@ -45,7 +45,7 @@ class BlobManager(ManagedAuthentication):
         else:
             resource_group_name = resource_group
             self.url = f"https://{account_name}.blob.core.windows.net"
-            credential = self.get_credential(Resources.BLOB)
+            credential = self.get_credential()
             subscription = self.extract_subscription(credential)
             self._client = StorageManagementClient(
                 credential,
