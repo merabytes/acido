@@ -113,7 +113,6 @@ jobs:
             -H 'User-Agent: Merabytes-Portal' \
             -d @examples/example_lambda_payload.json \
             --max-time 900 \
-            --silent \
             --write-out "\n%{http_code}")
           
           # Extract HTTP status code (last line)
