@@ -30,30 +30,50 @@ This implementation follows the OneTimeSecret pattern where secrets self-destruc
 
 - **Create Secret**: Store a secret and receive a unique UUID
 - **Retrieve Secret**: Get the secret once using the UUID (auto-deletes after retrieval)
-- **Secure Storage**: All secrets stored in Azure KeyVault
+- **Check Secret**: Check if a secret is encrypted without retrieving it (non-destructive)
+- **Password Encryption**: Optional client-side password protection for secrets
+- **Secure Storage**: All secrets stored in Azure KeyVault with explicit encryption metadata
 - **Serverless**: Runs on AWS Lambda with automatic scaling
 - **Continuous Deployment**: Automated deployment via GitHub Actions
 - **Bot Protection**: Optional CloudFlare Turnstile integration for spam prevention
+
+## How It Works
+
+The API provides three main operations:
+
+1. **Create**: Store a secret (with optional password encryption) and get a UUID
+2. **Check**: Verify if a secret is encrypted before attempting to retrieve it
+3. **Retrieve**: Get the secret once (with password if encrypted) and auto-delete
+
+### Encryption Metadata
+
+When creating a secret, the service stores two items in Azure KeyVault:
+- `{uuid}` - The actual secret value (encrypted or plaintext)
+- `{uuid}-metadata` - Explicit marker indicating "encrypted" or "plaintext"
+
+This ensures bulletproof detection of encryption status without content inspection, preventing false positives from base64-encoded data.
 
 ## API Reference
 
 ### Create Secret
 
-Store a new secret and receive a UUID to access it.
+Store a new secret and receive a UUID to access it. Optionally encrypt with a password.
 
-**Request (without Turnstile):**
-```json
-{
-  "action": "create",
-  "secret": "Your secret message here"
-}
-```
-
-**Request (with Turnstile enabled):**
+**Request (plaintext secret):**
 ```json
 {
   "action": "create",
   "secret": "Your secret message here",
+  "turnstile_token": "cloudflare-turnstile-response-token"
+}
+```
+
+**Request (password-encrypted secret):**
+```json
+{
+  "action": "create",
+  "secret": "Your secret message here",
+  "password": "your-encryption-password",
   "turnstile_token": "cloudflare-turnstile-response-token"
 }
 ```
@@ -65,6 +85,11 @@ Store a new secret and receive a UUID to access it.
   "message": "Secret created successfully"
 }
 ```
+
+**Notes:**
+- If `password` is provided, the secret is encrypted with AES-256 using PBKDF2 key derivation
+- The same password must be provided during retrieval to decrypt
+- Metadata is stored to track encryption status (bulletproof detection)
 
 **Response (400 Bad Request - Turnstile enabled, token missing):**
 ```json
@@ -80,23 +105,67 @@ Store a new secret and receive a UUID to access it.
 }
 ```
 
-### Retrieve Secret
+### Check Secret
 
-Retrieve and delete a secret using its UUID (one-time access).
+Check if a secret is encrypted without retrieving or deleting it. This is useful for frontend applications to conditionally render password input fields.
 
-**Request (without Turnstile):**
+**Request:**
 ```json
 {
-  "action": "retrieve",
-  "uuid": "550e8400-e29b-41d4-a716-446655440000"
+  "action": "check",
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "turnstile_token": "cloudflare-turnstile-response-token"
 }
 ```
 
-**Request (with Turnstile enabled):**
+**Response (200 OK - Encrypted secret):**
+```json
+{
+  "encrypted": true,
+  "requires_password": true
+}
+```
+
+**Response (200 OK - Plaintext secret):**
+```json
+{
+  "encrypted": false,
+  "requires_password": false
+}
+```
+
+**Response (404 Not Found):**
+```json
+{
+  "error": "Secret not found or already accessed"
+}
+```
+
+**Notes:**
+- Non-destructive operation - secret remains accessible after check
+- Uses stored metadata for bulletproof encryption detection
+- No content inspection or heuristics - 100% reliable
+- Frontend can use `requires_password` to show/hide password input
+
+### Retrieve Secret
+
+Retrieve and delete a secret using its UUID (one-time access). Provide password if the secret is encrypted.
+
+**Request (plaintext secret):**
 ```json
 {
   "action": "retrieve",
   "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "turnstile_token": "cloudflare-turnstile-response-token"
+}
+```
+
+**Request (encrypted secret with password):**
+```json
+{
+  "action": "retrieve",
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "password": "your-encryption-password",
   "turnstile_token": "cloudflare-turnstile-response-token"
 }
 ```
@@ -109,12 +178,123 @@ Retrieve and delete a secret using its UUID (one-time access).
 }
 ```
 
+**Response (400 Bad Request - Missing password for encrypted secret):**
+```json
+{
+  "error": "Password required for encrypted secret"
+}
+```
+
+**Response (400 Bad Request - Wrong password):**
+```json
+{
+  "error": "Decryption failed: Invalid password or corrupted data"
+}
+```
+
 **Response (404 Not Found):**
 ```json
 {
   "error": "Secret not found or already accessed"
 }
 ```
+
+**Notes:**
+- Secret is automatically deleted after retrieval (one-time access)
+- If secret is encrypted, password must match the one used during creation
+- Wrong password or missing password for encrypted secrets returns 400 error
+- Secret is deleted even if decryption fails (security measure)
+
+## Workflow Examples
+
+### Basic Workflow (Plaintext Secret)
+
+1. **Create** a plaintext secret:
+   ```bash
+   curl -X POST https://lambda-url/secrets \
+     -H "Content-Type: application/json" \
+     -d '{
+       "action": "create",
+       "secret": "Meet me at the coffee shop at 3pm",
+       "turnstile_token": "token..."
+     }'
+   ```
+   Response: `{"uuid": "abc-123", "message": "Secret created successfully"}`
+
+2. **Share** the UUID with recipient: `https://yourapp.com/view/abc-123`
+
+3. **Check** if password is needed (optional):
+   ```bash
+   curl -X POST https://lambda-url/secrets \
+     -H "Content-Type: application/json" \
+     -d '{
+       "action": "check",
+       "uuid": "abc-123",
+       "turnstile_token": "token..."
+     }'
+   ```
+   Response: `{"encrypted": false, "requires_password": false}`
+
+4. **Retrieve** the secret:
+   ```bash
+   curl -X POST https://lambda-url/secrets \
+     -H "Content-Type: application/json" \
+     -d '{
+       "action": "retrieve",
+       "uuid": "abc-123",
+       "turnstile_token": "token..."
+     }'
+   ```
+   Response: `{"secret": "Meet me at the coffee shop at 3pm", ...}`
+
+5. **Try again** - fails with 404 (already accessed)
+
+### Advanced Workflow (Password-Encrypted Secret)
+
+1. **Create** an encrypted secret:
+   ```bash
+   curl -X POST https://lambda-url/secrets \
+     -H "Content-Type: application/json" \
+     -d '{
+       "action": "create",
+       "secret": "Database password: super_secret_123",
+       "password": "myStrongPassword2024",
+       "turnstile_token": "token..."
+     }'
+   ```
+   Response: `{"uuid": "xyz-789", "message": "Secret created successfully"}`
+
+2. **Share** UUID and password separately:
+   - Email: "Here's the secret UUID: xyz-789"
+   - SMS: "Password: myStrongPassword2024"
+
+3. **Check** encryption status:
+   ```bash
+   curl -X POST https://lambda-url/secrets \
+     -H "Content-Type: application/json" \
+     -d '{
+       "action": "check",
+       "uuid": "xyz-789",
+       "turnstile_token": "token..."
+     }'
+   ```
+   Response: `{"encrypted": true, "requires_password": true}`
+   (Frontend shows password input field)
+
+4. **Retrieve** with password:
+   ```bash
+   curl -X POST https://lambda-url/secrets \
+     -H "Content-Type: application/json" \
+     -d '{
+       "action": "retrieve",
+       "uuid": "xyz-789",
+       "password": "myStrongPassword2024",
+       "turnstile_token": "token..."
+     }'
+   ```
+   Response: `{"secret": "Database password: super_secret_123", ...}`
+
+5. **Wrong password** - returns 400 and deletes secret (security measure)
 
 ## Deployment
 
@@ -263,14 +443,21 @@ curl -X POST https://<lambda-url>/secrets \
   -d @examples/example_lambda_secrets_create_payload.json
 ```
 
-2. **Retrieve the secret (using UUID from step 1):**
+2. **Check if the secret is encrypted (using UUID from step 1):**
+```bash
+curl -X POST https://<lambda-url>/secrets \
+  -H "Content-Type: application/json" \
+  -d @examples/example_lambda_secrets_check_payload.json
+```
+
+3. **Retrieve the secret (using UUID from step 1):**
 ```bash
 curl -X POST https://<lambda-url>/secrets \
   -H "Content-Type: application/json" \
   -d @examples/example_lambda_secrets_retrieve_payload.json
 ```
 
-3. **Try retrieving again (should fail with 404):**
+4. **Try retrieving again (should fail with 404):**
 ```bash
 curl -X POST https://<lambda-url>/secrets \
   -H "Content-Type: application/json" \
@@ -279,17 +466,24 @@ curl -X POST https://<lambda-url>/secrets \
 
 ## Example Payloads
 
-Example request payloads are provided:
-- `examples/example_lambda_secrets_create_payload.json` - Create a secret
-- `examples/example_lambda_secrets_retrieve_payload.json` - Retrieve a secret
+Example request payloads are provided in the `examples/` directory:
+- `example_lambda_secrets_create_payload.json` - Create a secret (with optional password)
+- `example_lambda_secrets_check_payload.json` - Check if a secret is encrypted
+- `example_lambda_secrets_retrieve_payload.json` - Retrieve a secret (with optional password)
+
+**Note:** Remember to include `turnstile_token` in all requests if CloudFlare Turnstile is enabled.
 
 ## Security Considerations
 
 1. **One-Time Access**: Secrets are automatically deleted after retrieval
-2. **Azure KeyVault**: Industry-standard secret storage
-3. **HTTPS Only**: All communication should be over HTTPS
-4. **No Logging**: Secrets should never be logged
-5. **Time Limits**: Consider adding TTL for secrets in Key Vault
+2. **Password Encryption**: Optional AES-256 encryption with PBKDF2 (100,000 iterations)
+3. **Bulletproof Encryption Detection**: Metadata storage ensures reliable encryption status tracking
+4. **Azure KeyVault**: Industry-standard secret storage with access controls
+5. **HTTPS Only**: All communication should be over HTTPS
+6. **No Logging**: Secrets should never be logged
+7. **Bot Protection**: Optional CloudFlare Turnstile prevents automated abuse
+8. **Secure Deletion**: Secrets deleted even if decryption fails (prevents brute force)
+9. **Time Limits**: Consider adding TTL for secrets in Key Vault (future enhancement)
 
 ## VaultManager API Extensions
 
