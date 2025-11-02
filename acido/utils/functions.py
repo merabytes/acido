@@ -1,4 +1,6 @@
-from huepy import *
+from huepy import good, bad, info
+
+
 import time
 import subprocess
 import os

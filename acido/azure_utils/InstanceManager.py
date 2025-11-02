@@ -7,7 +7,9 @@ from azure.mgmt.containerinstance.models import (
     ResourceIdentityType)
 from azure.mgmt.containerinstance.models import ContainerGroupIdentity, UserAssignedIdentities
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
-from huepy import *
+from huepy import good, bad, info
+
+
 from shlex import quote
 import logging
 

@@ -12,11 +12,17 @@ on:
 env:
   # Azure credentials - required for full integration tests
   # These should be configured as repository secrets
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
   IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
   IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
   IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
   STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+  # Docker Hub credentials - used for pulling base images
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
 
 jobs:
   test:
@@ -64,6 +70,7 @@ jobs:
     - name: Test CLI help
       run: |
         python -m acido.cli --help
+        python -m acido.cli create --help
 
     - name: Run Python syntax check
       run: |
@@ -99,7 +106,7 @@ jobs:
         python -m acido.cli --help
 
   acido-create-test:
-    name: Test acido --create nuclei
+    name: Test Supported Security Tools
     runs-on: ubuntu-latest
     
     steps:
@@ -116,17 +123,114 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install .
 
-    - name: Test acido --create nuclei
+    - name: Test acido create nuclei
       env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
         IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
         IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
         IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+        STORAGE_ACCOUNT_NAME: acido
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       run: |
-        # This will test that acido can create a nuclei image
+        # This will test that acido can create a nuclei image using the correct Docker image
         # It will use environment variables for configuration
-        acido --create nuclei || echo "Note: Image creation may fail without proper credentials, but command should execute"
+        acido create nuclei --image projectdiscovery/nuclei:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: Test acido create kali
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: acido
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        # This will test that acido can create a kali image using the correct Docker image
+        # It will use environment variables for configuration
+        acido create kali --image kalilinux/kali-rolling:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: Test acido create httpx
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: acido
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        # This will test that acido can create a httpx image using the correct Docker image
+        # It will use environment variables for configuration
+        acido create httpx --image projectdiscovery/httpx:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: Test acido create naabu
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: acido
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        # This will test that acido can create a naabu image using the correct Docker image
+        # It will use environment variables for configuration
+        acido create naabu --image projectdiscovery/naabu:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: Test acido create subfinder
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: acido
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        # This will test that acido can create a subfinder image using the correct Docker image
+        # It will use environment variables for configuration
+        acido create subfinder --image projectdiscovery/subfinder:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: Test acido create tldfinder
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: acido
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        # This will test that acido can create a tldfinder image using the correct Docker image
+        # It will use environment variables for configuration
+        acido create tldfinder --image projectdiscovery/tldfinder:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
 
   lint:
     name: Code Quality Checks

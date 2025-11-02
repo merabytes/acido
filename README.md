@@ -70,14 +70,18 @@ paypal.com
 
 2. Create scanning image:
 ```bash
-acido --create nmap
+# Using short name (will look for 'nmap' image)
+acido create nmap
+
+# Or specify the full Docker image URL
+acido create nuclei --image projectdiscovery/nuclei:latest
 ```
 
 3. Run distributed scan:
 ```bash
 acido -f nmap-scan \
     -n 3 \
-    --image nmap \
+    -im nmap \
     -t 'nmap -iL input -p 0-1000' \
     -i targets.txt \
     -o output \
@@ -87,7 +91,7 @@ acido -f nmap-scan \
 Parameters:
 - `-f` Fleet name
 - `-n` Number of container instances
-- `--image` Image name
+- `-im` Image name (e.g., 'nmap', 'nuclei:latest', or full URL)
 - `-t` Command to execute
 - `-i` Input file (auto-split across containers)
 - `-o` Output file
@@ -102,12 +106,19 @@ usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP]
              [--ip] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] 
              [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
+             {create}
+
+positional arguments:
+  {create}              Subcommands
+    create              Create acido-compatible image from base image
+                        Usage: acido create <name> [--image <full-image-url>]
 
 optional arguments:
   -h, --help            Show help message
   -c, --config          Configure acido
   -f FLEET              Fleet name
   -im IMAGE_NAME        Deploy specific image
+  --create IMAGE        Create acido-compatible image (alternative syntax)
   --create-ip NAME      Create IPv4 address for routing
   --ip                  Use existing IPv4 address
   -n NUM                Number of instances
@@ -135,7 +146,7 @@ Scan 1,000 hosts with 20 containers:
 ```bash
 acido -f nmap-fleet \
     -n 20 \
-    --image myregistry.azurecr.io/nmap:latest \
+    -im nmap \
     -t 'nmap -iL input -p- --min-rate 1000' \
     -i targets.txt \
     -o output \
@@ -149,7 +160,7 @@ Scan 10,000 URLs with 50 containers:
 ```bash
 acido -f nuclei-scan \
     -n 50 \
-    --image myregistry.azurecr.io/nuclei:latest \
+    -im nuclei \
     -t 'nuclei -list input -t /nuclei-templates/' \
     -i urls.txt \
     -o results
@@ -162,7 +173,7 @@ Scan entire network with 100 containers:
 ```bash
 acido -f masscan \
     -n 100 \
-    --image myregistry.azurecr.io/masscan:latest \
+    -im masscan \
     -t 'masscan -iL input -p0-65535 --rate 10000' \
     -i networks.txt \
     -o masscan-results
