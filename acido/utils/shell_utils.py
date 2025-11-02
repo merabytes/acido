@@ -59,7 +59,7 @@ def wait_command(rg, cg, cont, wait=None, instance_manager=None):
                         # Check individual containers in the instance view
                         if hasattr(container_group.instance_view, 'events') and container_group.instance_view.events:
                             for event in container_group.instance_view.events:
-                                if hasattr(event, 'type') and 'Error' in event.type:
+                                if hasattr(event, 'type') and event.type == 'Error':
                                     exception = f"Container group '{cg}' has error event: {event.message if hasattr(event, 'message') else 'Unknown error'}"
                                     break
                         
@@ -67,8 +67,10 @@ def wait_command(rg, cg, cont, wait=None, instance_manager=None):
                             break
                 
                 last_state_check = time_spent
-            except Exception as e:
+            except (HttpResponseError, AttributeError) as e:
                 # Don't fail the entire wait if state check fails, just continue
+                # HttpResponseError: API call failures (e.g., network issues)
+                # AttributeError: Missing attributes on container_group object
                 pass
         
         try:
