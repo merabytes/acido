@@ -5,15 +5,11 @@ FROM public.ecr.aws/lambda/python:3.12
 COPY requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-# Copy the acido package
-COPY acido/ ${LAMBDA_TASK_ROOT}/acido/
-COPY setup.py ${LAMBDA_TASK_ROOT}/
+# Copy the entire acido package
+COPY . ${LAMBDA_TASK_ROOT}/
 
 # Install acido
 RUN pip install --no-cache-dir ${LAMBDA_TASK_ROOT}
-
-# Copy Lambda handler
-COPY lambda_handler.py ${LAMBDA_TASK_ROOT}/
 
 # Set the Lambda handler
 CMD ["lambda_handler.lambda_handler"]
