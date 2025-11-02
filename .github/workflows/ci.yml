@@ -63,7 +63,7 @@ jobs:
     - name: Test acido imports
       run: |
         python -c "from acido.azure_utils.BlobManager import BlobManager"
-        python -c "from acido.azure_utils.InstanceManager import InstanceManager, Resources"
+        python -c "from acido.azure_utils.InstanceManager import InstanceManager"
         python -c "from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile"
         python -c "from acido.azure_utils.VaultManager import VaultManager"
         python -c "from acido.azure_utils.ManagedIdentity import ManagedAuthentication"
