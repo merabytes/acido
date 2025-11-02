@@ -48,12 +48,14 @@ def lambda_handler(event, context):
     # Parse event
     if isinstance(event, str):
         event = json.loads(event)
-        
-    event = event.get("body", {})
     
-    # If body was a string, parse it
-    if isinstance(event, str):
-        event = json.loads(event)
+    # Handle body wrapper (e.g., from API Gateway)
+    # If event has a "body" key, use that, otherwise use the event itself
+    if "body" in event:
+        event = event.get("body", {})
+        # If body was a string, parse it
+        if isinstance(event, str):
+            event = json.loads(event)
     
     # Validate required fields
     if not event:

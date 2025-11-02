@@ -11,6 +11,7 @@ Acido (**A**zure **C**ontainer **I**nstance **D**istributed **O**perations) enab
 - [Quick Start](#quick-start)
 - [CLI Reference](#cli-reference)
 - [Examples](#examples)
+- [AWS Lambda Support](#aws-lambda-support)
 - [Credits](#credits)
 
 ## Why Acido?
@@ -193,6 +194,30 @@ acido -f scan -n 50 --ip \
     -t 'nmap -iL input -p-' \
     -i targets.txt
 ```
+
+## AWS Lambda Support
+
+Acido can be deployed as an AWS Lambda function, enabling serverless security scanning workflows.
+
+**Key Features:**
+- Serverless invocation via AWS Lambda
+- Automatic container provisioning in Azure
+- JSON-based event interface
+- Continuous deployment via GitHub Actions
+
+**Quick Example:**
+```json
+{
+  "image": "nmap",
+  "targets": ["merabytes.com", "uber.com", "facebook.com"],
+  "task": "nmap -iL input -p 0-1000"
+}
+```
+
+**Documentation:**
+- See [LAMBDA.md](LAMBDA.md) for complete deployment and usage instructions
+- Example payload: [example_lambda_payload.json](example_lambda_payload.json)
+- Automatic deployment workflow: [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml)
 
 ## Credits
 
