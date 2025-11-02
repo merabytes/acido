@@ -157,8 +157,8 @@ Added CloudFlare Turnstile support to prevent bot abuse of the secrets service. 
 - Added links to full documentation
 
 #### Example Payloads
-- `example_lambda_secrets_create_payload.json` - Example for creating a secret
-- `example_lambda_secrets_retrieve_payload.json` - Example for retrieving a secret
+- `examples/example_lambda_secrets_create_payload.json` - Example for creating a secret
+- `examples/example_lambda_secrets_retrieve_payload.json` - Example for retrieving a secret
 
 ## Test Results
 
@@ -186,8 +186,8 @@ All tests passing:
 4. `test_vault_manager.py` - VaultManager tests
 5. `test_lambda_handler_secrets.py` - Lambda handler tests
 6. `SECRETS.md` - Complete documentation
-7. `example_lambda_secrets_create_payload.json` - Example payload
-8. `example_lambda_secrets_retrieve_payload.json` - Example payload
+7. `examples/example_lambda_secrets_create_payload.json` - Example payload
+8. `examples/example_lambda_secrets_retrieve_payload.json` - Example payload
 
 ### Modified Files (2):
 1. `acido/azure_utils/VaultManager.py` - Added 3 new methods

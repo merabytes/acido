@@ -152,7 +152,7 @@ If you've configured a Lambda Function URL:
 curl -X POST "https://your-function-url.lambda-url.eu-west-1.on.aws/" \
   -H "Content-Type: application/json" \
   -H "User-Agent: Merabytes-Portal" \
-  -d @example_lambda_payload.json
+  -d @examples/example_lambda_payload.json
 ```
 
 The deployment workflow automatically tests the Function URL after each deployment if the `LAMBDA_FUNCTION_URL` secret is configured.

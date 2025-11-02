@@ -2,8 +2,7 @@
   "image": "kali-rolling",
   "targets": [
     "merabytes.com",
-    "uber.com",
-    "facebook.com"
+    "uber.com"
   ],
-  "task": "nmap -iL input -p 0-1000"
+  "task": "nmap -iL input -p 80"
 }
