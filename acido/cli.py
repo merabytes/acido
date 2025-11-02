@@ -12,8 +12,8 @@ from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import InstanceManager, Resources
 from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
 from acido.utils.functions import chunks, jpath, expanduser, split_file
+from acido.utils.lambda_safe_pool import ThreadPoolShim
 from huepy import good, bad, info, bold, green, red, orange
-from multiprocessing.pool import ThreadPool
 import code
 import re
 import os
@@ -1128,7 +1128,7 @@ def main():
     if args.download_input:
         acido.load_input(args.download_input, write_to_file=True)
     if args.fleet:
-        pool = ThreadPool(processes=30)
+        pool = ThreadPoolShim(processes=30)
         args.num_instances = int(args.num_instances) if args.num_instances else 1
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, args.image_tag)
@@ -1149,7 +1149,7 @@ def main():
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:
-        pool = ThreadPool(processes=30)
+        pool = ThreadPoolShim(processes=30)
         acido.exec(
             command=args.exec_cmd, 
             max_retries=int(args.wait) if args.wait else 60, 

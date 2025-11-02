@@ -11,7 +11,7 @@ import sys
 import tempfile
 import traceback
 from acido.cli import Acido
-from multiprocessing.pool import ThreadPool
+from acido.utils.lambda_safe_pool import ThreadPoolShim
 
 def lambda_handler(event, context):
     """
@@ -106,7 +106,7 @@ def lambda_handler(event, context):
         acido = Acido(check_config=True)
         
         # Create thread pool for fleet operations
-        pool = ThreadPool(processes=30)
+        pool = ThreadPoolShim(processes=30)
         
         # Make pool available globally for the fleet operation
         import acido.cli as cli_module
