@@ -162,7 +162,7 @@ class InstanceManager(ManagedAuthentication):
                 identity=ContainerGroupIdentity(
                     type=ResourceIdentityType.user_assigned,
                     user_assigned_identities={
-                        self.user_assigned['id']: UserAssignedIdentities(client_id=self.user_assigned['clientId'])
+                        self.user_assigned.get('id', ''): UserAssignedIdentities(client_id=self.user_assigned.get('clientId', ''))
                     }
                 )
             )
