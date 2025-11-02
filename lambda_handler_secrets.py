@@ -75,6 +75,10 @@ def decrypt_secret(encrypted_value: str, password: str) -> str:
         # Decode from base64
         encrypted_data = base64.b64decode(encrypted_value.encode())
         
+        # Validate minimum length (IV + at least one block)
+        if len(encrypted_data) < 32:  # 16 bytes IV + 16 bytes minimum ciphertext
+            raise ValueError("Invalid encrypted data - too short")
+        
         # Extract IV (first 16 bytes) and ciphertext
         iv = encrypted_data[:16]
         ciphertext = encrypted_data[16:]
@@ -85,6 +89,10 @@ def decrypt_secret(encrypted_value: str, password: str) -> str:
         
         # Decrypt
         padded_secret = decryptor.update(ciphertext) + decryptor.finalize()
+        
+        # Validate decrypted data is not empty
+        if not padded_secret:
+            raise ValueError("Empty decrypted data")
         
         # Validate and remove padding
         padding_length = padded_secret[-1]
@@ -106,6 +114,7 @@ def decrypt_secret(encrypted_value: str, password: str) -> str:
         raise ValueError("Decryption failed. Invalid password or corrupted data")
     except Exception as e:
         raise ValueError(f"Decryption failed. Invalid password or corrupted data: {str(e)}")
+
 
 
 def validate_turnstile(token, remoteip=None) -> bool:
