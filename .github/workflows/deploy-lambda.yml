@@ -137,7 +137,13 @@ jobs:
             if command -v jq &> /dev/null; then
               echo ""
               echo "Response details:"
-              echo "$response_body" | jq -r 'try (.body | fromjson | "Fleet: \(.fleet_name), Instances: \(.instances), Image: \(.image)") catch "Could not parse response body"'
+              # Try to extract body from last line (which should be the JSON response without headers)
+              json_response=$(echo "$response_body" | grep -o '{.*}' | tail -n1)
+              if [ -n "$json_response" ]; then
+                echo "$json_response" | jq -r 'try ("Fleet: \(.fleet_name), Instances: \(.instances), Image: \(.image), Outputs: \(.outputs | keys | length) containers") catch "Fleet: \(.fleet_name), Instances: \(.instances), Image: \(.image)"'
+              else
+                echo "Could not extract JSON from response"
+              fi
             fi
           else
             echo "✗ Lambda function test FAILED"
