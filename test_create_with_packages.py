@@ -183,6 +183,74 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertNotIn('install -y nmap evil', dockerfile)
         self.assertNotIn('install -y evil', dockerfile)
 
+    def test_generate_dockerfile_with_update_debian(self):
+        """Test Dockerfile generation with default package update for Debian."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'ubuntu:20.04'
+        distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
+        packages = ['nmap']
+        
+        # Default behavior: update packages (no_update=False)
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False)
+        
+        # Check that apt-get update is included
+        self.assertIn('apt-get update && apt-get install -y nmap', dockerfile)
+
+    def test_generate_dockerfile_without_update_debian(self):
+        """Test Dockerfile generation without package update for Debian."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'ubuntu:20.04'
+        distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
+        packages = ['nmap']
+        
+        # With --no-update flag (no_update=True)
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=True)
+        
+        # Check that apt-get update is NOT included in custom packages section
+        self.assertNotIn('apt-get update && apt-get install -y nmap', dockerfile)
+        # But should have apt-get install without update
+        self.assertIn('apt-get install -y nmap', dockerfile)
+
+    def test_generate_dockerfile_with_update_alpine(self):
+        """Test Dockerfile generation with default package update for Alpine."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'alpine:3.14'
+        distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
+        packages = ['nmap']
+        
+        # Default behavior: update packages (no_update=False)
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False)
+        
+        # Check that apk update is included
+        self.assertIn('apk update && apk add --no-cache nmap', dockerfile)
+
+    def test_generate_dockerfile_without_update_alpine(self):
+        """Test Dockerfile generation without package update for Alpine."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'alpine:3.14'
+        distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
+        packages = ['nmap']
+        
+        # With --no-update flag (no_update=True)
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=True)
+        
+        # Check that apk update is NOT included in custom packages section
+        self.assertNotIn('apk update && apk add --no-cache nmap', dockerfile)
+        # But should have apk add without update
+        self.assertIn('apk add --no-cache nmap', dockerfile)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -39,6 +39,7 @@ create_parser = subparsers.add_parser('create', help='Create acido-compatible im
 create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", "ubuntu:20.04")')
 create_parser.add_argument('--image', dest='base_image_url', help='Full Docker image URL to use as base (e.g., "projectdiscovery/nuclei:latest")')
 create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan)')
+create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 
 # Configure subcommand (alias for -c/--config)
 configure_parser = subparsers.add_parser('configure', help='Configure acido (alias for -c/--config)')
@@ -174,6 +175,10 @@ parser.add_argument("--install",
                     dest="install_packages",
                     help="Package to install (can be specified multiple times, e.g., --install nmap --install masscan)",
                     action='append')
+parser.add_argument("--no-update",
+                    dest="no_update",
+                    help="Skip package list update before installing packages",
+                    action='store_true')
 
 
 args = parser.parse_args()
@@ -1002,7 +1007,7 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
-    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None) -> str:
+    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False) -> str:
         """Generate Dockerfile content based on distro and install custom packages."""
         
         # Validate all package names to prevent command injection
@@ -1024,7 +1029,9 @@ class Acido(object):
             pkg_install = ''
             if validated_packages:
                 pkg_list = ' '.join(validated_packages)
-                pkg_install = f'\n# Install custom packages\nRUN apk update && apk add --no-cache {pkg_list}\n'
+                # By default, update package lists; skip if no_update is True
+                update_cmd = '' if no_update else 'apk update && '
+                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apk add --no-cache {pkg_list}\n'
             
             return f"""FROM {base_image}
 
@@ -1047,6 +1054,8 @@ CMD ["sleep", "infinity"]
             pkg_install = ''
             if validated_packages:
                 pkg_list = ' '.join(validated_packages)
+                # By default, update package lists; skip if no_update is True
+                # For yum/dnf, we don't need explicit update as install does it automatically
                 pkg_install = f'\n# Install custom packages\nRUN {pkg_manager} install -y {pkg_list} && {pkg_manager} clean all\n'
             
             return f"""FROM {base_image}
@@ -1068,7 +1077,9 @@ CMD ["sleep", "infinity"]
             pkg_install = ''
             if validated_packages:
                 pkg_list = ' '.join(validated_packages)
-                pkg_install = f'\n# Install custom packages\nRUN apt-get update && apt-get install -y {pkg_list} && rm -rf /var/lib/apt/lists/*\n'
+                # By default, update package lists; skip if no_update is True
+                update_cmd = '' if no_update else 'apt-get update && '
+                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apt-get install -y {pkg_list} && rm -rf /var/lib/apt/lists/*\n'
             
             return f"""FROM {base_image}
 
@@ -1082,7 +1093,7 @@ ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None):
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False):
         """
         Create an acido-compatible Docker image from a base image.
         
@@ -1090,6 +1101,7 @@ CMD ["sleep", "infinity"]
             base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04')
             quiet: Suppress verbose output and show progress bar
             install_packages: List of packages to install (e.g., ['nmap', 'masscan'])
+            no_update: Skip package list update before installing packages
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1129,7 +1141,7 @@ CMD ["sleep", "infinity"]
             pbar.set_description("Generating Dockerfile")
         
         # Generate Dockerfile content
-        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages)
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update)
         
         # Create temporary directory and Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1311,7 +1323,8 @@ def main():
         acido.rm(args.remove)
     if args.create_image:
         install_pkgs = getattr(args, 'install_packages', None)
-        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs)
+        no_update = getattr(args, 'no_update', False)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update)
 
 if __name__ == "__main__":
     main()
