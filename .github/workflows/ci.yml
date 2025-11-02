@@ -66,7 +66,7 @@ jobs:
         python -c "from acido.azure_utils.InstanceManager import InstanceManager"
         python -c "from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile"
         python -c "from acido.azure_utils.VaultManager import VaultManager"
-        python -c "from acido.azure_utils.ManagedIdentity import ManagedAuthentication"
+        python -c "from acido.azure_utils.ManagedIdentity import ManagedIdentity"
         python -c "from acido.utils.functions import chunks, split_file"
         python -c "from acido.utils.shell_utils import wait_command, exec_command"
 
