@@ -14,7 +14,126 @@ import os
 import traceback
 import uuid
 import requests
+import base64
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 from acido.azure_utils.VaultManager import VaultManager
+
+
+def encrypt_secret(secret_value: str, password: str) -> str:
+    """
+    Encrypt a secret using AES-256 with a password.
+    
+    Args:
+        secret_value: The secret to encrypt
+        password: The password to use for encryption
+        
+    Returns:
+        str: Base64-encoded encrypted secret with salt and IV prepended
+    """
+    # Generate a random salt for PBKDF2
+    salt = os.urandom(16)
+    
+    # Derive a 256-bit key from the password using PBKDF2
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode())
+    
+    # Generate a random 128-bit IV
+    iv = os.urandom(16)
+    
+    # Create cipher and encrypt
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    
+    # Pad the secret to be a multiple of 16 bytes (AES block size)
+    secret_bytes = secret_value.encode()
+    padding_length = 16 - (len(secret_bytes) % 16)
+    padded_secret = secret_bytes + bytes([padding_length] * padding_length)
+    
+    # Encrypt the padded secret
+    encrypted = encryptor.update(padded_secret) + encryptor.finalize()
+    
+    # Prepend salt and IV to encrypted data and encode as base64
+    return base64.b64encode(salt + iv + encrypted).decode()
+
+
+def decrypt_secret(encrypted_value: str, password: str) -> str:
+    """
+    Decrypt a secret using AES-256 with a password.
+    
+    Args:
+        encrypted_value: Base64-encoded encrypted secret with salt and IV prepended
+        password: The password to use for decryption
+        
+    Returns:
+        str: Decrypted secret
+        
+    Raises:
+        ValueError: If decryption fails (wrong password or corrupted data)
+    """
+    try:
+        # Decode from base64
+        encrypted_data = base64.b64decode(encrypted_value.encode())
+        
+        # Validate minimum length (salt + IV + at least one block)
+        if len(encrypted_data) < 48:  # 16 bytes salt + 16 bytes IV + 16 bytes minimum ciphertext
+            raise ValueError("Invalid encrypted data - too short")
+        
+        # Extract salt (first 16 bytes), IV (next 16 bytes), and ciphertext
+        salt = encrypted_data[:16]
+        iv = encrypted_data[16:32]
+        ciphertext = encrypted_data[32:]
+        
+        # Derive the same 256-bit key from the password using PBKDF2
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = kdf.derive(password.encode())
+        
+        # Create cipher and decrypt
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        
+        # Decrypt
+        padded_secret = decryptor.update(ciphertext) + decryptor.finalize()
+        
+        # Validate decrypted data is not empty
+        if not padded_secret:
+            raise ValueError("Empty decrypted data")
+        
+        # Validate and remove padding
+        padding_length = padded_secret[-1]
+        
+        # Validate padding (PKCS7)
+        if padding_length > 16 or padding_length == 0:
+            raise ValueError("Invalid padding - likely wrong password")
+        
+        # Check that all padding bytes are the same
+        for i in range(padding_length):
+            if padded_secret[-(i+1)] != padding_length:
+                raise ValueError("Invalid padding - likely wrong password")
+        
+        secret_bytes = padded_secret[:-padding_length]
+        
+        # Attempt to decode as UTF-8 to further validate
+        return secret_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        raise ValueError("Decryption failed. Invalid password or corrupted data")
+    except Exception as e:
+        raise ValueError(f"Decryption failed. Invalid password or corrupted data: {str(e)}")
+
 
 
 def validate_turnstile(token, remoteip=None) -> bool:
@@ -54,14 +173,21 @@ def lambda_handler(event, context):
     {
         "action": "create",
         "secret": "my-secret-value",
-        "turnstile_token": "optional-cloudflare-turnstile-token"
+        "password": "optional-password-for-encryption",
+        "turnstile_token": "cloudflare-turnstile-token"
     }
     
     Expected event format for retrieving/deleting a secret:
     {
         "action": "retrieve",
         "uuid": "generated-uuid-here",
-        "turnstile_token": "optional-cloudflare-turnstile-token"
+        "password": "password-if-encrypted",
+        "turnstile_token": "cloudflare-turnstile-token"
+    }
+    
+    Expected event format for healthcheck:
+    {
+        "action": "healthcheck"
     }
     
     Or with body wrapper (from API Gateway):
@@ -69,7 +195,8 @@ def lambda_handler(event, context):
         "body": {
             "action": "create",
             "secret": "my-secret-value",
-            "turnstile_token": "optional-cloudflare-turnstile-token"
+            "password": "optional-password-for-encryption",
+            "turnstile_token": "cloudflare-turnstile-token"
         }
     }
     
@@ -78,17 +205,36 @@ def lambda_handler(event, context):
     - AZURE_TENANT_ID
     - AZURE_CLIENT_ID
     - AZURE_CLIENT_SECRET
+    - CF_SECRET_KEY: CloudFlare Turnstile secret key (bot protection is always enabled)
     
-    Environment variables optional:
-    - CF_SECRET_KEY: CloudFlare Turnstile secret key (enables bot protection)
+    Password-based encryption:
+    - If "password" is provided during creation, the secret will be encrypted with AES-256
+    - The same password must be provided during retrieval to decrypt the secret
+    - If no password is provided, the secret is stored as-is (backward compatible)
     
     Returns:
         dict: Response with statusCode and body containing operation result
     """
     
-    # Parse event
+    # CORS headers for merabytes.com domains
+    cors_headers = {
+        "Access-Control-Allow-Origin": "https://www.merabytes.com",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Content-Type": "application/json"
+    }
+    
+    # Parse event first to handle string inputs
     if isinstance(event, str):
         event = json.loads(event)
+    
+    # Handle OPTIONS preflight request
+    if event.get("requestContext", {}).get("http", {}).get("method") == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": cors_headers,
+            "body": json.dumps({"message": "CORS preflight OK"})
+        }
     
     # Handle body wrapper (e.g., from API Gateway)
     if "body" in event:
@@ -100,6 +246,7 @@ def lambda_handler(event, context):
     if not event:
         return {
             'statusCode': 400,
+            'headers': cors_headers,
             'body': json.dumps({
                 'error': 'Missing event body. Expected fields: action, secret (for create) or uuid (for retrieve)'
             })
@@ -107,40 +254,54 @@ def lambda_handler(event, context):
     
     action = event.get('action')
     
-    if not action or action not in ['create', 'retrieve']:
+    # Handle healthcheck action (no turnstile validation required)
+    if action == 'healthcheck':
         return {
-            'statusCode': 400,
+            'statusCode': 200,
+            'headers': cors_headers,
             'body': json.dumps({
-                'error': 'Invalid or missing action. Must be either "create" or "retrieve"'
+                'status': 'healthy',
+                'message': 'Lambda function is running',
+                'version': '0.35'
             })
         }
     
-    # Validate CloudFlare Turnstile token if CF_SECRET_KEY is set
-    if os.environ.get('CF_SECRET_KEY'):
-        turnstile_token = event.get('turnstile_token')
-        
-        if not turnstile_token:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'error': 'Missing required field: turnstile_token (bot protection enabled)'
-                })
-            }
-        
-        # Extract remote IP from context or event
-        remoteip = None
-        if context and hasattr(context, 'identity') and hasattr(context.identity, 'sourceIp'):
-            remoteip = context.identity.sourceIp
-        elif 'requestContext' in event and 'identity' in event['requestContext']:
-            remoteip = event['requestContext']['identity'].get('sourceIp')
-        
-        if not validate_turnstile(turnstile_token, remoteip):
-            return {
-                'statusCode': 403,
-                'body': json.dumps({
-                    'error': 'Invalid or expired Turnstile token'
-                })
-            }
+    if not action or action not in ['create', 'retrieve']:
+        return {
+            'statusCode': 400,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Invalid or missing action. Must be "create", "retrieve", or "healthcheck"'
+            })
+        }
+    
+    # Validate CloudFlare Turnstile token (now always required for create/retrieve)
+    turnstile_token = event.get('turnstile_token')
+    
+    if not turnstile_token:
+        return {
+            'statusCode': 400,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Missing required field: turnstile_token (bot protection enabled)'
+            })
+        }
+    
+    # Extract remote IP from context or event
+    remoteip = None
+    if context and hasattr(context, 'identity') and hasattr(context.identity, 'sourceIp'):
+        remoteip = context.identity.sourceIp
+    elif 'requestContext' in event and 'identity' in event['requestContext']:
+        remoteip = event['requestContext']['identity'].get('sourceIp')
+    
+    if not validate_turnstile(turnstile_token, remoteip):
+        return {
+            'statusCode': 403,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Invalid or expired Turnstile token'
+            })
+        }
     
     try:
         # Initialize VaultManager with Azure Key Vault
@@ -149,10 +310,12 @@ def lambda_handler(event, context):
         if action == 'create':
             # Create a new secret
             secret_value = event.get('secret')
+            password = event.get('password')  # Optional password for encryption
             
             if not secret_value:
                 return {
                     'statusCode': 400,
+                    'headers': cors_headers,
                     'body': json.dumps({
                         'error': 'Missing required field: secret'
                     })
@@ -161,12 +324,26 @@ def lambda_handler(event, context):
             # Generate UUID for the secret
             secret_uuid = str(uuid.uuid4())
             
+            # Encrypt secret if password is provided
+            if password:
+                try:
+                    secret_value = encrypt_secret(secret_value, password)
+                except Exception as e:
+                    return {
+                        'statusCode': 500,
+                        'headers': cors_headers,
+                        'body': json.dumps({
+                            'error': f'Encryption failed: {str(e)}'
+                        })
+                    }
+            
             # Store secret in Key Vault
             vault_manager.set_secret(secret_uuid, secret_value)
             
             # Return success response with UUID
             return {
                 'statusCode': 201,
+                'headers': cors_headers,
                 'body': json.dumps({
                     'uuid': secret_uuid,
                     'message': 'Secret created successfully'
@@ -176,10 +353,12 @@ def lambda_handler(event, context):
         elif action == 'retrieve':
             # Retrieve and delete a secret (one-time access)
             secret_uuid = event.get('uuid')
+            password = event.get('password')  # Optional password for decryption
             
             if not secret_uuid:
                 return {
                     'statusCode': 400,
+                    'headers': cors_headers,
                     'body': json.dumps({
                         'error': 'Missing required field: uuid'
                     })
@@ -189,6 +368,7 @@ def lambda_handler(event, context):
             if not vault_manager.secret_exists(secret_uuid):
                 return {
                     'statusCode': 404,
+                    'headers': cors_headers,
                     'body': json.dumps({
                         'error': 'Secret not found or already accessed'
                     })
@@ -197,12 +377,28 @@ def lambda_handler(event, context):
             # Retrieve the secret value
             secret_value = vault_manager.get_secret(secret_uuid)
             
+            # Decrypt secret if password is provided
+            if password:
+                try:
+                    secret_value = decrypt_secret(secret_value, password)
+                except ValueError as e:
+                    # Delete the secret even if decryption fails
+                    vault_manager.delete_secret(secret_uuid)
+                    return {
+                        'statusCode': 400,
+                        'headers': cors_headers,
+                        'body': json.dumps({
+                            'error': f'Decryption failed: {str(e)}'
+                        })
+                    }
+            
             # Delete the secret (one-time access)
             vault_manager.delete_secret(secret_uuid)
             
             # Return success response with secret value
             return {
                 'statusCode': 200,
+                'headers': cors_headers,
                 'body': json.dumps({
                     'secret': secret_value,
                     'message': 'Secret retrieved and deleted successfully'
@@ -219,5 +415,6 @@ def lambda_handler(event, context):
         
         return {
             'statusCode': 500,
+            'headers': cors_headers,
             'body': json.dumps(error_details)
         }

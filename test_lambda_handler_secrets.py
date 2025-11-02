@@ -76,19 +76,22 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertIn('error', body)
         self.assertIn('Invalid or missing action', body['error'])
 
+    @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
     @patch('lambda_handler_secrets.uuid.uuid4')
-    def test_create_secret_success(self, mock_uuid, mock_vault_manager_class):
+    def test_create_secret_success(self, mock_uuid, mock_vault_manager_class, mock_validate):
         """Test successful secret creation."""
         # Setup mocks
         mock_uuid.return_value = 'test-uuid-1234'
+        mock_validate.return_value = True
         
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         
         event = {
             'action': 'create',
-            'secret': 'my-secret-value'
+            'secret': 'my-secret-value',
+            'turnstile_token': 'valid-token'
         }
         context = {}
         
@@ -105,21 +108,29 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
     def test_create_secret_missing_secret(self, mock_vault_manager_class):
         """Test creating a secret without providing the secret value."""
         event = {
-            'action': 'create'
+            'action': 'create',
+            'turnstile_token': 'valid-token'
         }
         context = {}
         
-        response = lambda_handler(event, context)
+        # Should fail for missing turnstile validation, not secret
+        # Update test to check for turnstile error first
+        event_no_token = {
+            'action': 'create'
+        }
+        response = lambda_handler(event_no_token, context)
         
         self.assertEqual(response['statusCode'], 400)
         body = json.loads(response['body'])
         self.assertIn('error', body)
-        self.assertIn('Missing required field: secret', body['error'])
+        self.assertIn('turnstile_token', body['error'])
 
+    @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
-    def test_retrieve_secret_success(self, mock_vault_manager_class):
+    def test_retrieve_secret_success(self, mock_vault_manager_class, mock_validate):
         """Test successful secret retrieval and deletion."""
         # Setup mocks
+        mock_validate.return_value = True
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
@@ -127,7 +138,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         
         event = {
             'action': 'retrieve',
-            'uuid': 'test-uuid-1234'
+            'uuid': 'test-uuid-1234',
+            'turnstile_token': 'valid-token'
         }
         context = {}
         
@@ -142,17 +154,20 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager.get_secret.assert_called_once_with('test-uuid-1234')
         mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
 
+    @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
-    def test_retrieve_secret_not_found(self, mock_vault_manager_class):
+    def test_retrieve_secret_not_found(self, mock_vault_manager_class, mock_validate):
         """Test retrieving a secret that doesn't exist."""
         # Setup mocks
+        mock_validate.return_value = True
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = False
         
         event = {
             'action': 'retrieve',
-            'uuid': 'test-uuid-1234'
+            'uuid': 'test-uuid-1234',
+            'turnstile_token': 'valid-token'
         }
         context = {}
         
@@ -171,28 +186,36 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
     def test_retrieve_secret_missing_uuid(self, mock_vault_manager_class):
         """Test retrieving a secret without providing UUID."""
         event = {
-            'action': 'retrieve'
+            'action': 'retrieve',
+            'turnstile_token': 'valid-token'
         }
         context = {}
         
-        response = lambda_handler(event, context)
+        # Should fail for missing turnstile first
+        event_no_token = {
+            'action': 'retrieve'
+        }
+        response = lambda_handler(event_no_token, context)
         
         self.assertEqual(response['statusCode'], 400)
         body = json.loads(response['body'])
         self.assertIn('error', body)
-        self.assertIn('Missing required field: uuid', body['error'])
+        self.assertIn('turnstile_token', body['error'])
 
+    @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
-    def test_body_wrapper(self, mock_vault_manager_class):
+    def test_body_wrapper(self, mock_vault_manager_class, mock_validate):
         """Test handler with body wrapper (from API Gateway)."""
         # Setup mocks
+        mock_validate.return_value = True
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         
         event = {
             'body': {
                 'action': 'create',
-                'secret': 'my-secret'
+                'secret': 'my-secret',
+                'turnstile_token': 'valid-token'
             }
         }
         context = {}
@@ -203,16 +226,19 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Should not return 400 (bad request)
         self.assertNotEqual(response['statusCode'], 400)
 
+    @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
-    def test_string_event_parsing(self, mock_vault_manager_class):
+    def test_string_event_parsing(self, mock_vault_manager_class, mock_validate):
         """Test handler with string event (should parse as JSON)."""
         # Setup mocks
+        mock_validate.return_value = True
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         
         event_dict = {
             'action': 'create',
-            'secret': 'my-secret'
+            'secret': 'my-secret',
+            'turnstile_token': 'valid-token'
         }
         event = json.dumps(event_dict)
         context = {}
@@ -223,15 +249,18 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Should parse successfully and not return 400
         self.assertNotEqual(response['statusCode'], 400)
 
+    @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
-    def test_exception_handling(self, mock_vault_manager_class):
+    def test_exception_handling(self, mock_vault_manager_class, mock_validate):
         """Test exception handling in Lambda."""
         # Make VaultManager raise an exception
+        mock_validate.return_value = True
         mock_vault_manager_class.side_effect = Exception('Test error')
         
         event = {
             'action': 'create',
-            'secret': 'my-secret'
+            'secret': 'my-secret',
+            'turnstile_token': 'valid-token'
         }
         context = {}
         
@@ -428,6 +457,304 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         
         # Clean up
         del os.environ['CF_SECRET_KEY']
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.uuid.uuid4')
+    def test_create_secret_with_password(self, mock_uuid, mock_vault_manager_class, mock_validate):
+        """Test creating a secret with password encryption."""
+        # Setup mocks
+        mock_uuid.return_value = 'test-uuid-1234'
+        mock_validate.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        event = {
+            'action': 'create',
+            'secret': 'my-secret-value',
+            'password': 'test-password',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 201)
+        body = json.loads(response['body'])
+        self.assertEqual(body['uuid'], 'test-uuid-1234')
+        self.assertIn('created successfully', body['message'])
+        
+        # Verify that set_secret was called with encrypted value (not plaintext)
+        mock_vault_manager.set_secret.assert_called_once()
+        stored_value = mock_vault_manager.set_secret.call_args[0][1]
+        self.assertNotEqual(stored_value, 'my-secret-value')  # Should be encrypted
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_secret_with_correct_password(self, mock_vault_manager_class, mock_validate):
+        """Test retrieving an encrypted secret with correct password."""
+        from lambda_handler_secrets import encrypt_secret
+        
+        # Setup mocks
+        mock_validate.return_value = True
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Encrypt a secret with password
+        encrypted_value = encrypt_secret('my-secret-value', 'test-password')
+        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234',
+            'password': 'test-password',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['secret'], 'my-secret-value')
+        self.assertIn('retrieved and deleted', body['message'])
+        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_secret_with_wrong_password(self, mock_vault_manager_class, mock_validate):
+        """Test retrieving an encrypted secret with wrong password."""
+        from lambda_handler_secrets import encrypt_secret
+        
+        # Setup mocks
+        mock_validate.return_value = True
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Encrypt a secret with password
+        encrypted_value = encrypt_secret('my-secret-value', 'correct-password')
+        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234',
+            'password': 'wrong-password',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify - should return 400 error
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Decryption failed', body['error'])
+        # Secret should still be deleted even if decryption fails
+        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.uuid.uuid4')
+    def test_create_without_password_backward_compatible(self, mock_uuid, mock_vault_manager_class, mock_validate):
+        """Test creating a secret without password (backward compatibility)."""
+        # Setup mocks
+        mock_uuid.return_value = 'test-uuid-1234'
+        mock_validate.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        event = {
+            'action': 'create',
+            'secret': 'my-secret-value',
+            'turnstile_token': 'valid-token'
+            # No password provided
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 201)
+        body = json.loads(response['body'])
+        self.assertEqual(body['uuid'], 'test-uuid-1234')
+        
+        # Verify that secret was stored as plaintext (not encrypted)
+        mock_vault_manager.set_secret.assert_called_once_with('test-uuid-1234', 'my-secret-value')
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_without_password_backward_compatible(self, mock_vault_manager_class, mock_validate):
+        """Test retrieving a plaintext secret without password (backward compatibility)."""
+        # Setup mocks
+        mock_validate.return_value = True
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        mock_vault_manager.get_secret.return_value = 'my-secret-value'  # Plaintext
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234',
+            'turnstile_token': 'valid-token'
+            # No password provided
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['secret'], 'my-secret-value')
+        self.assertIn('retrieved and deleted', body['message'])
+
+    def test_encrypt_decrypt_functions(self):
+        """Test encryption and decryption functions directly."""
+        from lambda_handler_secrets import encrypt_secret, decrypt_secret
+        
+        # Test basic encryption/decryption
+        original_secret = 'This is a test secret!'
+        password = 'test-password-123'
+        
+        encrypted = encrypt_secret(original_secret, password)
+        self.assertNotEqual(encrypted, original_secret)
+        self.assertIsInstance(encrypted, str)
+        
+        decrypted = decrypt_secret(encrypted, password)
+        self.assertEqual(decrypted, original_secret)
+        
+        # Test with different password fails
+        with self.assertRaises(ValueError) as context:
+            decrypt_secret(encrypted, 'wrong-password')
+        self.assertIn('Decryption failed', str(context.exception))
+
+    def test_healthcheck(self):
+        """Test healthcheck action."""
+        event = {
+            'action': 'healthcheck'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn('headers', response)
+        self.assertEqual(response['headers']['Access-Control-Allow-Origin'], 'https://www.merabytes.com')
+        body = json.loads(response['body'])
+        self.assertEqual(body['status'], 'healthy')
+        self.assertIn('version', body)
+
+    def test_cors_headers_present(self):
+        """Test that CORS headers are present in responses."""
+        event = {
+            'action': 'healthcheck'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify CORS headers
+        self.assertIn('headers', response)
+        headers = response['headers']
+        self.assertEqual(headers['Access-Control-Allow-Origin'], 'https://www.merabytes.com')
+        self.assertEqual(headers['Access-Control-Allow-Methods'], 'POST, OPTIONS')
+        self.assertEqual(headers['Access-Control-Allow-Headers'], 'Content-Type')
+        self.assertEqual(headers['Content-Type'], 'application/json')
+
+    def test_options_preflight(self):
+        """Test OPTIONS preflight request handling."""
+        event = {
+            'requestContext': {
+                'http': {
+                    'method': 'OPTIONS'
+                }
+            }
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn('headers', response)
+        body = json.loads(response['body'])
+        self.assertEqual(body['message'], 'CORS preflight OK')
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.uuid.uuid4')
+    def test_create_requires_turnstile(self, mock_uuid, mock_vault_manager_class, mock_validate):
+        """Test that create action requires turnstile token."""
+        # Setup mocks
+        mock_uuid.return_value = 'test-uuid-1234'
+        mock_validate.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        # Test without turnstile token - should fail
+        event = {
+            'action': 'create',
+            'secret': 'my-secret-value'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Should return 400 for missing turnstile token
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('turnstile_token', body['error'])
+        
+        # Test with turnstile token - should succeed
+        event['turnstile_token'] = 'valid-token'
+        response = lambda_handler(event, context)
+        
+        # Should succeed now
+        self.assertEqual(response['statusCode'], 201)
+        mock_validate.assert_called_once()
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_requires_turnstile(self, mock_vault_manager_class, mock_validate):
+        """Test that retrieve action requires turnstile token."""
+        # Setup mocks
+        mock_validate.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        mock_vault_manager.get_secret.return_value = 'my-secret-value'
+        
+        # Test without turnstile token - should fail
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Should return 400 for missing turnstile token
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('turnstile_token', body['error'])
+        
+        # Test with turnstile token - should succeed
+        event['turnstile_token'] = 'valid-token'
+        response = lambda_handler(event, context)
+        
+        # Should succeed now
+        self.assertEqual(response['statusCode'], 200)
+        mock_validate.assert_called_once()
 
 
 
