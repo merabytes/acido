@@ -9,7 +9,6 @@ on:
 env:
   AWS_REGION: eu-west-1
   ECR_REPOSITORY: acido
-  ECR_REGISTRY: 318257425368.dkr.ecr.eu-west-1.amazonaws.com
   LAMBDA_FUNCTION_NAME: Acido
 
 jobs:
@@ -40,6 +39,7 @@ jobs:
       id: build-image
       env:
         IMAGE_TAG: ${{ github.sha }}
+        ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
       run: |
         # Build the Docker image
         docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.lambda .

@@ -24,6 +24,7 @@ The Lambda function allows you to invoke acido's distributed scanning capabiliti
 2. GitHub repository secrets configured:
    - `AWS_ACCESS_KEY_ID`
    - `AWS_SECRET_ACCESS_KEY`
+   - `ECR_REGISTRY` (e.g., `318257425368.dkr.ecr.eu-west-1.amazonaws.com`)
    - `AZURE_TENANT_ID`
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
@@ -46,17 +47,20 @@ The workflow:
 ### Manual Deployment
 
 ```bash
+# Set your ECR registry
+ECR_REGISTRY="your-account-id.dkr.ecr.your-region.amazonaws.com"
+
 # Login to ECR
-aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin 318257425368.dkr.ecr.eu-west-1.amazonaws.com
+aws ecr get-login-password --region eu-west-1 | docker login --username AWS --password-stdin $ECR_REGISTRY
 
 # Build and push
-docker build -t 318257425368.dkr.ecr.eu-west-1.amazonaws.com/acido:latest -f Dockerfile.lambda .
-docker push 318257425368.dkr.ecr.eu-west-1.amazonaws.com/acido:latest
+docker build -t $ECR_REGISTRY/acido:latest -f Dockerfile.lambda .
+docker push $ECR_REGISTRY/acido:latest
 
 # Update Lambda
 aws lambda update-function-code \
   --function-name Acido \
-  --image-uri 318257425368.dkr.ecr.eu-west-1.amazonaws.com/acido:latest
+  --image-uri $ECR_REGISTRY/acido:latest
 ```
 
 ## Usage
