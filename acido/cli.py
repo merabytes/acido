@@ -38,6 +38,8 @@ subparsers = parser.add_subparsers(dest='subcommand', help='Subcommands')
 create_parser = subparsers.add_parser('create', help='Create acido-compatible image from base image')
 create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", "ubuntu:20.04")')
 create_parser.add_argument('--image', dest='base_image_url', help='Full Docker image URL to use as base (e.g., "projectdiscovery/nuclei:latest")')
+create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan)')
+create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 
 # Configure subcommand (alias for -c/--config)
 configure_parser = subparsers.add_parser('configure', help='Configure acido (alias for -c/--config)')
@@ -169,6 +171,14 @@ parser.add_argument("--create",
                     dest="create_image",
                     help="Create acido-compatible image from base image (e.g., 'nuclei', 'ubuntu:20.04')",
                     action='store')
+parser.add_argument("--install",
+                    dest="install_packages",
+                    help="Package to install (can be specified multiple times, e.g., --install nmap --install masscan)",
+                    action='append')
+parser.add_argument("--no-update",
+                    dest="no_update",
+                    help="Skip package list update before installing packages",
+                    action='store_true')
 
 
 args = parser.parse_args()
@@ -820,6 +830,36 @@ class Acido(object):
         # Build full URL with -acido suffix
         return f"{self.image_registry_server}/{base_name}-acido:{image_tag}"
 
+    def _validate_package_name(self, package_name: str) -> bool:
+        """
+        Validate package name using allowlist approach to prevent command injection.
+        
+        Valid package names can only contain:
+        - Letters (a-z, A-Z)
+        - Digits (0-9)
+        - Dots (.)
+        - Hyphens (-)
+        - Underscores (_)
+        - Plus signs (+) for Debian packages
+        
+        Any other character will cause validation to fail.
+        
+        Returns:
+            bool: True if valid, False otherwise
+        """
+        # Allowlist approach: only allow specific characters used in package names
+        allowed_chars = set('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_+')
+        
+        # Check if all characters in the package name are in the allowlist
+        if not all(char in allowed_chars for char in package_name):
+            return False
+        
+        # Additional validation: must not be empty and must start with alphanumeric
+        if not package_name or not package_name[0].isalnum():
+            return False
+        
+        return True
+
     def _validate_image_name(self, image_name: str) -> bool:
         """
         Validate Docker image name using allowlist approach to prevent command injection.
@@ -967,15 +1007,37 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
-    def _generate_dockerfile(self, base_image: str, distro_info: dict) -> str:
-        """Generate Dockerfile content based on distro."""
+    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False) -> str:
+        """Generate Dockerfile content based on distro and install custom packages."""
+        
+        # Validate all package names to prevent command injection
+        validated_packages = []
+        if install_packages:
+            for pkg in install_packages:
+                if self._validate_package_name(pkg):
+                    validated_packages.append(pkg)
+                else:
+                    print(bad(f'Invalid package name "{pkg}" - skipping'))
+        
+        # Check if base image contains 'kali-rolling' to auto-install kali-linux-large
+        if 'kali-rolling' in base_image.lower():
+            if 'kali-linux-large' not in validated_packages:
+                validated_packages.insert(0, 'kali-linux-large')
         
         if distro_info['type'] == 'alpine':
+            # Build apk install command if packages are specified
+            pkg_install = ''
+            if validated_packages:
+                pkg_list = ' '.join(validated_packages)
+                # By default, update package lists; skip if no_update is True
+                update_cmd = '' if no_update else 'apk update && '
+                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apk add --no-cache {pkg_list}\n'
+            
             return f"""FROM {base_image}
 
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers
-
+{pkg_install}
 # Install acido (psutil will build from source)
 RUN python3 -m pip install --break-system-packages acido
 
@@ -987,11 +1049,20 @@ CMD ["sleep", "infinity"]
             # Validate pkg_manager to prevent injection
             if pkg_manager not in ['yum', 'dnf']:
                 pkg_manager = 'yum'  # Default to yum if invalid
+            
+            # Build yum/dnf install command if packages are specified
+            pkg_install = ''
+            if validated_packages:
+                pkg_list = ' '.join(validated_packages)
+                # By default, update package lists; skip if no_update is True
+                # For yum/dnf, we don't need explicit update as install does it automatically
+                pkg_install = f'\n# Install custom packages\nRUN {pkg_manager} install -y {pkg_list} && {pkg_manager} clean all\n'
+            
             return f"""FROM {base_image}
 
 # Install Python and build dependencies required for psutil and other native extensions
 RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all
-
+{pkg_install}
 # Install acido (psutil will build from source)
 RUN python3 -m pip install acido
 
@@ -1001,11 +1072,20 @@ CMD ["sleep", "infinity"]
         else:  # Debian/Ubuntu-based
             # Check if we need --break-system-packages flag
             pip_flags = ' --break-system-packages' if distro_info.get('needs_break_packages', False) else ''
+            
+            # Build apt-get install command if packages are specified
+            pkg_install = ''
+            if validated_packages:
+                pkg_list = ' '.join(validated_packages)
+                # By default, update package lists; skip if no_update is True
+                update_cmd = '' if no_update else 'apt-get update && '
+                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apt-get install -y {pkg_list} && rm -rf /var/lib/apt/lists/*\n'
+            
             return f"""FROM {base_image}
 
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
-
+{pkg_install}
 # Install acido (psutil will build from source)
 RUN python3 -m pip install{pip_flags} acido
 
@@ -1013,13 +1093,15 @@ ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
 
-    def create_acido_image(self, base_image: str, quiet: bool = False):
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False):
         """
         Create an acido-compatible Docker image from a base image.
         
         Args:
             base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04')
             quiet: Suppress verbose output and show progress bar
+            install_packages: List of packages to install (e.g., ['nmap', 'masscan'])
+            no_update: Skip package list update before installing packages
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1059,7 +1141,7 @@ CMD ["sleep", "infinity"]
             pbar.set_description("Generating Dockerfile")
         
         # Generate Dockerfile content
-        dockerfile_content = self._generate_dockerfile(base_image, distro_info)
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update)
         
         # Create temporary directory and Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1240,7 +1322,9 @@ def main():
     if args.remove:
         acido.rm(args.remove)
     if args.create_image:
-        acido.create_acido_image(args.create_image, quiet=args.quiet)
+        install_pkgs = getattr(args, 'install_packages', None)
+        no_update = getattr(args, 'no_update', False)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update)
 
 if __name__ == "__main__":
     main()
