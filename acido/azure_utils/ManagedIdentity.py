@@ -28,7 +28,7 @@ class ManagedAuthentication:
 
     @property
     def client_id(self) -> str:
-        return _os.getenv("IDENTITY_CLIENT_ID")
+        return _os.getenv("MANAGED_IDENTITY_CLIENT_ID")
 
     def get_credential(self, resource):
         drivers = {

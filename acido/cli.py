@@ -226,9 +226,16 @@ class Acido(object):
         self.docker_username = os.getenv('DOCKER_USERNAME')
         self.docker_password = os.getenv('DOCKER_PASSWORD')
         
-
-        # Only try to create identity via Azure CLI if IDENTITY_CLIENT_ID is not already set
-        if not os.getenv('IDENTITY_CLIENT_ID', None) and not os.getenv('INSTANCE_NAME', None):
+        # Load managed identity from environment variables if provided
+        managed_identity_id = os.getenv('MANAGED_IDENTITY_ID')
+        managed_identity_client_id = os.getenv('MANAGED_IDENTITY_CLIENT_ID')
+        if managed_identity_id and managed_identity_client_id:
+            self.user_assigned = {
+                'id': managed_identity_id,
+                'clientId': managed_identity_client_id
+            }
+        # Only try to create identity via Azure CLI if managed identity env vars are not already set
+        elif not managed_identity_client_id and not os.getenv('INSTANCE_NAME', None):
             try:
                 az_identity_list = subprocess.check_output(f'az identity create --resource-group {self.rg} --name acido', shell=True)
                 az_identity_list = json.loads(az_identity_list)
@@ -424,7 +431,7 @@ class Acido(object):
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
                     'STORAGE_ACCOUNT_NAME': self.storage_account,
-                    'IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
+                    'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
                         "DefaultEndpointsProtocol=https;"
                         f"AccountName={self.blob_manager.account_name};AccountKey={self.blob_manager.account_key};"
@@ -457,7 +464,7 @@ class Acido(object):
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
                     'STORAGE_ACCOUNT_NAME': self.storage_account,
-                    'IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
+                    'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
                         "DefaultEndpointsProtocol=https;"
                         f"AccountName={self.blob_manager.account_name};AccountKey={self.blob_manager.account_key};"
