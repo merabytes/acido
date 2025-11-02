@@ -228,6 +228,150 @@ class TestWaitCommandWithSDK(unittest.TestCase):
         self.assertIsNotNone(exception)
         self.assertIn('Failed to retrieve', exception)
 
+    def test_wait_command_failed_provisioning_state(self):
+        """Test wait_command detects failed provisioning state."""
+        from acido.utils.shell_utils import wait_command
+        import time
+        
+        # Mock instance_manager
+        mock_im = MagicMock()
+        mock_im.get_container_logs.return_value = 'Still running...\n'
+        
+        # Mock container group with Failed provisioning state
+        mock_cg = MagicMock()
+        mock_cg.provisioning_state = 'Failed'
+        mock_im.get.return_value = mock_cg
+        
+        # Call wait_command - it should detect the failed state within 10 seconds
+        start_time = time.time()
+        cont, command_uuid, exception = wait_command(
+            rg='test-rg',
+            cg='test-cg',
+            cont='test-container',
+            wait=60,
+            instance_manager=mock_im
+        )
+        elapsed_time = time.time() - start_time
+        
+        # Verify results
+        self.assertEqual(cont, 'test-container')
+        self.assertIsNone(command_uuid)
+        self.assertIsNotNone(exception)
+        self.assertIn('Failed state', exception)
+        # Should exit within 15 seconds (10 second check + some buffer)
+        self.assertLess(elapsed_time, 15)
+
+    def test_wait_command_failed_instance_view_state(self):
+        """Test wait_command detects failed instance view state."""
+        from acido.utils.shell_utils import wait_command
+        import time
+        
+        # Mock instance_manager
+        mock_im = MagicMock()
+        mock_im.get_container_logs.return_value = 'Still running...\n'
+        
+        # Mock container group with Failed instance view state
+        mock_cg = MagicMock()
+        mock_cg.provisioning_state = 'Succeeded'
+        mock_instance_view = MagicMock()
+        mock_instance_view.state = 'Failed'
+        mock_cg.instance_view = mock_instance_view
+        mock_im.get.return_value = mock_cg
+        
+        # Call wait_command
+        start_time = time.time()
+        cont, command_uuid, exception = wait_command(
+            rg='test-rg',
+            cg='test-cg',
+            cont='test-container',
+            wait=60,
+            instance_manager=mock_im
+        )
+        elapsed_time = time.time() - start_time
+        
+        # Verify results
+        self.assertEqual(cont, 'test-container')
+        self.assertIsNone(command_uuid)
+        self.assertIsNotNone(exception)
+        self.assertIn('Failed state', exception)
+        # Should exit within 15 seconds
+        self.assertLess(elapsed_time, 15)
+
+    def test_wait_command_error_event(self):
+        """Test wait_command detects error events in instance view."""
+        from acido.utils.shell_utils import wait_command
+        import time
+        
+        # Mock instance_manager
+        mock_im = MagicMock()
+        mock_im.get_container_logs.return_value = 'Still running...\n'
+        
+        # Mock container group with error event
+        mock_cg = MagicMock()
+        mock_cg.provisioning_state = 'Succeeded'
+        mock_instance_view = MagicMock()
+        mock_instance_view.state = 'Running'
+        mock_event = MagicMock()
+        mock_event.type = 'Error'
+        mock_event.message = 'Out of memory'
+        mock_instance_view.events = [mock_event]
+        mock_cg.instance_view = mock_instance_view
+        mock_im.get.return_value = mock_cg
+        
+        # Call wait_command
+        start_time = time.time()
+        cont, command_uuid, exception = wait_command(
+            rg='test-rg',
+            cg='test-cg',
+            cont='test-container',
+            wait=60,
+            instance_manager=mock_im
+        )
+        elapsed_time = time.time() - start_time
+        
+        # Verify results
+        self.assertEqual(cont, 'test-container')
+        self.assertIsNone(command_uuid)
+        self.assertIsNotNone(exception)
+        self.assertIn('error event', exception)
+        # Should exit within 15 seconds
+        self.assertLess(elapsed_time, 15)
+
+    def test_wait_command_succeeds_with_healthy_state(self):
+        """Test wait_command completes normally with healthy state."""
+        from acido.utils.shell_utils import wait_command
+        
+        # Mock instance_manager
+        mock_im = MagicMock()
+        # First call returns running, second call returns command complete
+        mock_im.get_container_logs.side_effect = [
+            'Still running...\n',
+            'Still running...\n',
+            'command: uuid-success-123\n'
+        ]
+        
+        # Mock container group with healthy state
+        mock_cg = MagicMock()
+        mock_cg.provisioning_state = 'Succeeded'
+        mock_instance_view = MagicMock()
+        mock_instance_view.state = 'Running'
+        mock_cg.instance_view = mock_instance_view
+        mock_im.get.return_value = mock_cg
+        
+        # Call wait_command
+        cont, command_uuid, exception = wait_command(
+            rg='test-rg',
+            cg='test-cg',
+            cont='test-container',
+            wait=60,
+            instance_manager=mock_im
+        )
+        
+        # Verify results - should complete successfully
+        self.assertEqual(cont, 'test-container')
+        self.assertEqual(command_uuid, 'uuid-success-123')
+        self.assertIsNone(exception)
+
 
 if __name__ == '__main__':
     # Restore original argv
