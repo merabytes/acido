@@ -1,4 +1,4 @@
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
+from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from azure.keyvault.secrets import SecretClient
 import os
 
@@ -11,7 +11,7 @@ class VaultManager(ManagedAuthentication):
         if not vault_name:
             vault_name = os.getenv("KEY_VAULT_NAME")
         self.vault_name = vault_name
-        self.credential = self.get_credential(Resources.VAULT)
+        self.credential = self.get_credential()
         self.client = self.get_client(self.credential)
 
     def get_client(self, credential):

@@ -1,6 +1,6 @@
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.network.models import Delegation, VirtualNetwork, Subnet, NetworkProfile, PublicIPAddressSku, NatGatewaySku, SubResource, NatGateway
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
+from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from huepy import good, bad, info, bold, green, red, orange
 
 __authors__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
@@ -13,7 +13,7 @@ class NetworkManager(ManagedAuthentication):
         self.ip_address = ip_address
         
         if login:
-            credential = self.get_credential(Resources.NETWORK)
+            credential = self.get_credential()
             subscription = self.extract_subscription(credential)
             self._client = NetworkManagementClient(credential, subscription)
 

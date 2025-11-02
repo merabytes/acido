@@ -1,4 +1,4 @@
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication, Resources
+from acido.azure_utils.ManagedIdentity import ManagedAuthentication
 from acido.utils.decoration import __version__
 from azure.mgmt.containerinstance import ContainerInstanceManagementClient
 from azure.mgmt.containerinstance.models import (
@@ -7,7 +7,7 @@ from azure.mgmt.containerinstance.models import (
     ResourceIdentityType)
 from azure.mgmt.containerinstance.models import ContainerGroupIdentity, UserAssignedIdentities
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
-from huepy import good, bad, info
+from huepy import bad
 
 
 from shlex import quote
@@ -22,7 +22,7 @@ logger.disabled = True
 class InstanceManager(ManagedAuthentication):
     def __init__(self, resource_group, login: bool = True, user_assigned: dict = {}, network_profile=None):
         if login:
-            credential = self.get_credential(Resources.INSTANCE)
+            credential = self.get_credential()
             subscription = self.extract_subscription(credential)
             self._client = ContainerInstanceManagementClient(
                 credential,
