@@ -431,6 +431,7 @@ class Acido(object):
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
                     'STORAGE_ACCOUNT_NAME': self.storage_account,
+                    'STORAGE_ACCOUNT_KEY': self.blob_manager.account_key,
                     'MANAGED_IDENTITY_ID': self.user_assigned.get('id', None),
                     'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
@@ -465,6 +466,7 @@ class Acido(object):
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
                     'STORAGE_ACCOUNT_NAME': self.storage_account,
+                    'STORAGE_ACCOUNT_KEY': self.blob_manager.account_key,
                     'MANAGED_IDENTITY_ID': self.user_assigned.get('id', None),
                     'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
