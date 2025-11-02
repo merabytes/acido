@@ -80,8 +80,7 @@ jobs:
             STORAGE_ACCOUNT_NAME=${{ secrets.STORAGE_ACCOUNT_NAME }},
             STORAGE_ACCOUNT_KEY=${{ secrets.STORAGE_ACCOUNT_KEY }},
             MANAGED_IDENTITY_ID=${{ secrets.MANAGED_IDENTITY_ID }},
-            MANAGED_IDENTITY_CLIENT_ID=${{ secrets.MANAGED_IDENTITY_CLIENT_ID }},
-            INSTANCE_NAME=acido-lambda-instance
+            MANAGED_IDENTITY_CLIENT_ID=${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}
           }"
 
     - name: Wait for environment update to complete
