@@ -517,7 +517,7 @@ class Acido(object):
             for cg, containers in response.items():
                 for cont in list(containers.keys()):
                     result = pool.apply_async(wait_command, 
-                                                (self.rg, cg, cont, wait), 
+                                                (self.rg, cg, cont, wait, self.instance_manager), 
                                                 callback=build_output)
                     results.append(result)
 

@@ -5,6 +5,7 @@ azure.identity
 azure.keyvault.secrets
 azure.storage.blob
 azure.mgmt.network
+azure-mgmt-containerinstance
 websockets
 huepy
 msrestazure

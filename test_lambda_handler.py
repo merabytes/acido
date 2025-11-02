@@ -103,7 +103,7 @@ class TestLambdaHandler(unittest.TestCase):
             mock_acido.build_image_url.return_value = 'test.azurecr.io/nmap-acido:latest'
             mock_acido.fleet.return_value = ({}, {'container-1': 'output'})
             
-            with patch('lambda_handler.ThreadPool'):
+            with patch('lambda_handler.ThreadPoolShim'):
                 response = lambda_handler(event, context)
         
         # Should parse successfully and not return 400
@@ -127,14 +127,14 @@ class TestLambdaHandler(unittest.TestCase):
             mock_acido.build_image_url.return_value = 'test.azurecr.io/nmap-acido:latest'
             mock_acido.fleet.return_value = ({}, {'container-1': 'output'})
             
-            with patch('lambda_handler.ThreadPool'):
+            with patch('lambda_handler.ThreadPoolShim'):
                 response = lambda_handler(event, context)
         
         # Should not return 400 (bad request)
         self.assertNotEqual(response['statusCode'], 400)
 
     @patch('tempfile.NamedTemporaryFile')
-    @patch('lambda_handler.ThreadPool')
+    @patch('lambda_handler.ThreadPoolShim')
     @patch('lambda_handler.Acido')
     def test_successful_execution(self, mock_acido_class, mock_pool, mock_temp_file):
         """Test successful Lambda execution."""
@@ -171,7 +171,7 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertEqual(body['image'], 'nmap')
         self.assertIn('outputs', body)
 
-    @patch('lambda_handler.ThreadPool')
+    @patch('lambda_handler.ThreadPoolShim')
     @patch('lambda_handler.Acido')
     def test_exception_handling(self, mock_acido_class, mock_pool):
         """Test exception handling in Lambda."""
@@ -194,7 +194,7 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertIn('Test error', body['error'])
 
     @patch('tempfile.NamedTemporaryFile')
-    @patch('lambda_handler.ThreadPool')
+    @patch('lambda_handler.ThreadPoolShim')
     @patch('lambda_handler.Acido')
     def test_custom_fleet_name(self, mock_acido_class, mock_pool, mock_temp_file):
         """Test with custom fleet name."""

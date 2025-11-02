@@ -2,23 +2,53 @@ import os
 import subprocess
 import time
 from huepy import bad, bold
+from azure.core.exceptions import HttpResponseError
 
-def wait_command(rg, cg, cont, wait=None):
+def wait_command(rg, cg, cont, wait=None, instance_manager=None):
+    """
+    Wait for a command to complete by polling container logs.
+    
+    Args:
+        rg: Resource group name (kept for backward compatibility)
+        cg: Container group name
+        cont: Container name
+        wait: Optional timeout in seconds
+        instance_manager: InstanceManager instance for retrieving logs via Azure SDK
+        
+    Returns:
+        tuple: (container_name, command_uuid, exception)
+    """
     time_spent = 0
     exception = None
     command_uuid = None
-    container_logs = subprocess.check_output(
-        f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
-        shell=True
-    )
-    container_logs = container_logs.decode()
+    
+    # Get initial logs
+    try:
+        if instance_manager:
+            container_logs = instance_manager.get_container_logs(cg, cont)
+        else:
+            # Fallback to CLI for backward compatibility (will fail in Lambda)
+            container_logs = subprocess.check_output(
+                f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
+                shell=True
+            ).decode()
+    except (subprocess.CalledProcessError, HttpResponseError) as e:
+        exception = f"Failed to retrieve initial logs: {str(e)}"
+        return cont, command_uuid, exception
 
     while True:
-        container_logs = subprocess.check_output(
-        f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
-        shell=True
-        )
-        container_logs = container_logs.decode()
+        try:
+            if instance_manager:
+                container_logs = instance_manager.get_container_logs(cg, cont)
+            else:
+                # Fallback to CLI for backward compatibility (will fail in Lambda)
+                container_logs = subprocess.check_output(
+                    f'az container logs --resource-group {rg} --name {cg} --container-name {cont}', 
+                    shell=True
+                ).decode()
+        except (subprocess.CalledProcessError, HttpResponseError) as e:
+            exception = f"Failed to retrieve logs: {str(e)}"
+            break
 
         if wait and time_spent > wait:
             exception = 'TIMEOUT REACHED'

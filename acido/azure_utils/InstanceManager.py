@@ -260,3 +260,31 @@ class InstanceManager(ManagedAuthentication):
                 # We don't know what is happening, maybe transitioning?
                 print(str(e))
         return True
+
+    def get_container_logs(self, container_group_name: str, container_name: str, tail: int = None, timestamps: bool = False) -> str:
+        """
+        Retrieve logs from a container using Azure SDK.
+        
+        Args:
+            container_group_name: Name of the container group
+            container_name: Name of the container within the group
+            tail: Optional number of lines to return from the end of logs
+            timestamps: Whether to include timestamps in the logs
+            
+        Returns:
+            str: Container logs as a string
+            
+        Raises:
+            HttpResponseError: If there's an error retrieving logs
+        """
+        try:
+            logs = self._client.containers.list_logs(
+                resource_group_name=self.resource_group,
+                container_group_name=container_group_name,
+                container_name=container_name,
+                tail=tail,
+                timestamps=timestamps
+            )
+            return logs.content
+        except HttpResponseError as e:
+            raise e
