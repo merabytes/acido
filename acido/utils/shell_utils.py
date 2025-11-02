@@ -21,6 +21,8 @@ def wait_command(rg, cg, cont, wait=None, instance_manager=None):
     time_spent = 0
     exception = None
     command_uuid = None
+    state_check_interval = 10  # Check container group state every 10 seconds
+    last_state_check = 0
     
     # Get initial logs
     try:
@@ -37,6 +39,38 @@ def wait_command(rg, cg, cont, wait=None, instance_manager=None):
         return cont, command_uuid, exception
 
     while True:
+        # Check container group state periodically
+        if instance_manager and (time_spent - last_state_check) >= state_check_interval:
+            try:
+                container_group = instance_manager.get(cg)
+                if container_group:
+                    # Check if provisioning failed
+                    if container_group.provisioning_state == 'Failed':
+                        exception = f"Container group '{cg}' is in Failed state"
+                        break
+                    
+                    # Check individual container states if available
+                    if hasattr(container_group, 'instance_view') and container_group.instance_view:
+                        if hasattr(container_group.instance_view, 'state'):
+                            if container_group.instance_view.state == 'Failed':
+                                exception = f"Container group '{cg}' instance is in Failed state"
+                                break
+                        
+                        # Check individual containers in the instance view
+                        if hasattr(container_group.instance_view, 'events') and container_group.instance_view.events:
+                            for event in container_group.instance_view.events:
+                                if hasattr(event, 'type') and 'Error' in event.type:
+                                    exception = f"Container group '{cg}' has error event: {event.message if hasattr(event, 'message') else 'Unknown error'}"
+                                    break
+                        
+                        if exception:
+                            break
+                
+                last_state_check = time_spent
+            except Exception as e:
+                # Don't fail the entire wait if state check fails, just continue
+                pass
+        
         try:
             if instance_manager:
                 container_logs = instance_manager.get_container_logs(cg, cont)
