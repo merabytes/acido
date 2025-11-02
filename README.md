@@ -55,10 +55,20 @@ az acr create --resource-group MyResourceGroup --name myregistry --sku Basic
 4. Configure acido:
 ```bash
 acido -c
+# or
+acido configure
 ```
 Provide: resource group name, registry server (e.g., `myregistry.azurecr.io`), registry username, registry password, and storage account name.
 
-**Note:** For CI/CD pipelines, see [.github/AZURE_PERMISSIONS.md](.github/AZURE_PERMISSIONS.md) for Service Principal setup.
+**Note:** For CI/CD pipelines and Lambda deployments, you can use environment variables instead:
+- `AZURE_RESOURCE_GROUP`
+- `IMAGE_REGISTRY_SERVER`
+- `IMAGE_REGISTRY_USERNAME`
+- `IMAGE_REGISTRY_PASSWORD`
+- `STORAGE_ACCOUNT_NAME`
+- `STORAGE_ACCOUNT_KEY` (optional, if not provided will fetch from Azure)
+
+See [.github/AZURE_PERMISSIONS.md](.github/AZURE_PERMISSIONS.md) for Service Principal setup.
 
 ## Quick Start
 
@@ -107,12 +117,14 @@ usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP]
              [--ip] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] 
              [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
-             {create}
+             {create,configure}
 
 positional arguments:
-  {create}              Subcommands
+  {create,configure}    Subcommands
     create              Create acido-compatible image from base image
                         Usage: acido create <name> [--image <full-image-url>]
+    configure           Configure acido (alias for -c/--config)
+                        Usage: acido configure
 
 optional arguments:
   -h, --help            Show help message
