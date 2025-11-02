@@ -36,6 +36,8 @@ class TestLambdaHandler(unittest.TestCase):
         os.environ['IMAGE_REGISTRY_PASSWORD'] = 'test-pass'
         os.environ['STORAGE_ACCOUNT_NAME'] = 'testaccount'
         os.environ['STORAGE_ACCOUNT_KEY'] = 'test-storage-key'
+        os.environ['MANAGED_IDENTITY_ID'] = '/subscriptions/test-sub/resourcegroups/test-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/test-identity'
+        os.environ['MANAGED_IDENTITY_CLIENT_ID'] = 'test-managed-identity-client-id'
 
     def test_missing_body(self):
         """Test handler with missing body."""

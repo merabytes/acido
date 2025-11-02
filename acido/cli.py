@@ -226,9 +226,14 @@ class Acido(object):
         self.docker_username = os.getenv('DOCKER_USERNAME')
         self.docker_password = os.getenv('DOCKER_PASSWORD')
         
-
-        # Only try to create identity via Azure CLI if IDENTITY_CLIENT_ID is not already set
-        if not os.getenv('IDENTITY_CLIENT_ID', None) and not os.getenv('INSTANCE_NAME', None):
+        # Load managed identity from environment variables if provided
+        if os.getenv('MANAGED_IDENTITY_ID') and os.getenv('MANAGED_IDENTITY_CLIENT_ID'):
+            self.user_assigned = {
+                'id': os.getenv('MANAGED_IDENTITY_ID'),
+                'clientId': os.getenv('MANAGED_IDENTITY_CLIENT_ID')
+            }
+        # Only try to create identity via Azure CLI if managed identity env vars and IDENTITY_CLIENT_ID are not already set
+        elif not os.getenv('IDENTITY_CLIENT_ID', None) and not os.getenv('INSTANCE_NAME', None):
             try:
                 az_identity_list = subprocess.check_output(f'az identity create --resource-group {self.rg} --name acido', shell=True)
                 az_identity_list = json.loads(az_identity_list)
