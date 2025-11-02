@@ -14,7 +14,98 @@ import os
 import traceback
 import uuid
 import requests
+import base64
+import hashlib
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 from acido.azure_utils.VaultManager import VaultManager
+
+
+def encrypt_secret(secret_value: str, password: str) -> str:
+    """
+    Encrypt a secret using AES-256 with a password.
+    
+    Args:
+        secret_value: The secret to encrypt
+        password: The password to use for encryption
+        
+    Returns:
+        str: Base64-encoded encrypted secret with IV prepended
+    """
+    # Derive a 256-bit key from the password using SHA-256
+    key = hashlib.sha256(password.encode()).digest()
+    
+    # Generate a random 128-bit IV
+    iv = os.urandom(16)
+    
+    # Create cipher and encrypt
+    cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+    encryptor = cipher.encryptor()
+    
+    # Pad the secret to be a multiple of 16 bytes (AES block size)
+    secret_bytes = secret_value.encode()
+    padding_length = 16 - (len(secret_bytes) % 16)
+    padded_secret = secret_bytes + bytes([padding_length] * padding_length)
+    
+    # Encrypt the padded secret
+    encrypted = encryptor.update(padded_secret) + encryptor.finalize()
+    
+    # Prepend IV to encrypted data and encode as base64
+    return base64.b64encode(iv + encrypted).decode()
+
+
+def decrypt_secret(encrypted_value: str, password: str) -> str:
+    """
+    Decrypt a secret using AES-256 with a password.
+    
+    Args:
+        encrypted_value: Base64-encoded encrypted secret with IV prepended
+        password: The password to use for decryption
+        
+    Returns:
+        str: Decrypted secret
+        
+    Raises:
+        ValueError: If decryption fails (wrong password or corrupted data)
+    """
+    try:
+        # Derive the same 256-bit key from the password
+        key = hashlib.sha256(password.encode()).digest()
+        
+        # Decode from base64
+        encrypted_data = base64.b64decode(encrypted_value.encode())
+        
+        # Extract IV (first 16 bytes) and ciphertext
+        iv = encrypted_data[:16]
+        ciphertext = encrypted_data[16:]
+        
+        # Create cipher and decrypt
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        decryptor = cipher.decryptor()
+        
+        # Decrypt
+        padded_secret = decryptor.update(ciphertext) + decryptor.finalize()
+        
+        # Validate and remove padding
+        padding_length = padded_secret[-1]
+        
+        # Validate padding (PKCS7)
+        if padding_length > 16 or padding_length == 0:
+            raise ValueError("Invalid padding - likely wrong password")
+        
+        # Check that all padding bytes are the same
+        for i in range(padding_length):
+            if padded_secret[-(i+1)] != padding_length:
+                raise ValueError("Invalid padding - likely wrong password")
+        
+        secret_bytes = padded_secret[:-padding_length]
+        
+        # Attempt to decode as UTF-8 to further validate
+        return secret_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        raise ValueError("Decryption failed. Invalid password or corrupted data")
+    except Exception as e:
+        raise ValueError(f"Decryption failed. Invalid password or corrupted data: {str(e)}")
 
 
 def validate_turnstile(token, remoteip=None) -> bool:
@@ -54,6 +145,7 @@ def lambda_handler(event, context):
     {
         "action": "create",
         "secret": "my-secret-value",
+        "password": "optional-password-for-encryption",
         "turnstile_token": "optional-cloudflare-turnstile-token"
     }
     
@@ -61,6 +153,7 @@ def lambda_handler(event, context):
     {
         "action": "retrieve",
         "uuid": "generated-uuid-here",
+        "password": "password-if-encrypted",
         "turnstile_token": "optional-cloudflare-turnstile-token"
     }
     
@@ -69,6 +162,7 @@ def lambda_handler(event, context):
         "body": {
             "action": "create",
             "secret": "my-secret-value",
+            "password": "optional-password-for-encryption",
             "turnstile_token": "optional-cloudflare-turnstile-token"
         }
     }
@@ -81,6 +175,11 @@ def lambda_handler(event, context):
     
     Environment variables optional:
     - CF_SECRET_KEY: CloudFlare Turnstile secret key (enables bot protection)
+    
+    Password-based encryption:
+    - If "password" is provided during creation, the secret will be encrypted with AES-256
+    - The same password must be provided during retrieval to decrypt the secret
+    - If no password is provided, the secret is stored as-is (backward compatible)
     
     Returns:
         dict: Response with statusCode and body containing operation result
@@ -149,6 +248,7 @@ def lambda_handler(event, context):
         if action == 'create':
             # Create a new secret
             secret_value = event.get('secret')
+            password = event.get('password')  # Optional password for encryption
             
             if not secret_value:
                 return {
@@ -160,6 +260,18 @@ def lambda_handler(event, context):
             
             # Generate UUID for the secret
             secret_uuid = str(uuid.uuid4())
+            
+            # Encrypt secret if password is provided
+            if password:
+                try:
+                    secret_value = encrypt_secret(secret_value, password)
+                except Exception as e:
+                    return {
+                        'statusCode': 500,
+                        'body': json.dumps({
+                            'error': f'Encryption failed: {str(e)}'
+                        })
+                    }
             
             # Store secret in Key Vault
             vault_manager.set_secret(secret_uuid, secret_value)
@@ -176,6 +288,7 @@ def lambda_handler(event, context):
         elif action == 'retrieve':
             # Retrieve and delete a secret (one-time access)
             secret_uuid = event.get('uuid')
+            password = event.get('password')  # Optional password for decryption
             
             if not secret_uuid:
                 return {
@@ -196,6 +309,20 @@ def lambda_handler(event, context):
             
             # Retrieve the secret value
             secret_value = vault_manager.get_secret(secret_uuid)
+            
+            # Decrypt secret if password is provided
+            if password:
+                try:
+                    secret_value = decrypt_secret(secret_value, password)
+                except ValueError as e:
+                    # Delete the secret even if decryption fails
+                    vault_manager.delete_secret(secret_uuid)
+                    return {
+                        'statusCode': 400,
+                        'body': json.dumps({
+                            'error': f'Decryption failed: {str(e)}'
+                        })
+                    }
             
             # Delete the secret (one-time access)
             vault_manager.delete_secret(secret_uuid)

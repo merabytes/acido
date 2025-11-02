@@ -429,6 +429,168 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Clean up
         del os.environ['CF_SECRET_KEY']
 
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.uuid.uuid4')
+    def test_create_secret_with_password(self, mock_uuid, mock_vault_manager_class):
+        """Test creating a secret with password encryption."""
+        # Setup mocks
+        mock_uuid.return_value = 'test-uuid-1234'
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        event = {
+            'action': 'create',
+            'secret': 'my-secret-value',
+            'password': 'test-password'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 201)
+        body = json.loads(response['body'])
+        self.assertEqual(body['uuid'], 'test-uuid-1234')
+        self.assertIn('created successfully', body['message'])
+        
+        # Verify that set_secret was called with encrypted value (not plaintext)
+        mock_vault_manager.set_secret.assert_called_once()
+        stored_value = mock_vault_manager.set_secret.call_args[0][1]
+        self.assertNotEqual(stored_value, 'my-secret-value')  # Should be encrypted
+
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_secret_with_correct_password(self, mock_vault_manager_class):
+        """Test retrieving an encrypted secret with correct password."""
+        from lambda_handler_secrets import encrypt_secret
+        
+        # Setup mocks
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Encrypt a secret with password
+        encrypted_value = encrypt_secret('my-secret-value', 'test-password')
+        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234',
+            'password': 'test-password'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['secret'], 'my-secret-value')
+        self.assertIn('retrieved and deleted', body['message'])
+        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_secret_with_wrong_password(self, mock_vault_manager_class):
+        """Test retrieving an encrypted secret with wrong password."""
+        from lambda_handler_secrets import encrypt_secret
+        
+        # Setup mocks
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Encrypt a secret with password
+        encrypted_value = encrypt_secret('my-secret-value', 'correct-password')
+        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234',
+            'password': 'wrong-password'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify - should return 400 error
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Decryption failed', body['error'])
+        # Secret should still be deleted even if decryption fails
+        mock_vault_manager.delete_secret.assert_called_once_with('test-uuid-1234')
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.uuid.uuid4')
+    def test_create_without_password_backward_compatible(self, mock_uuid, mock_vault_manager_class):
+        """Test creating a secret without password (backward compatibility)."""
+        # Setup mocks
+        mock_uuid.return_value = 'test-uuid-1234'
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        event = {
+            'action': 'create',
+            'secret': 'my-secret-value'
+            # No password provided
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 201)
+        body = json.loads(response['body'])
+        self.assertEqual(body['uuid'], 'test-uuid-1234')
+        
+        # Verify that secret was stored as plaintext (not encrypted)
+        mock_vault_manager.set_secret.assert_called_once_with('test-uuid-1234', 'my-secret-value')
+
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_retrieve_without_password_backward_compatible(self, mock_vault_manager_class):
+        """Test retrieving a plaintext secret without password (backward compatibility)."""
+        # Setup mocks
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        mock_vault_manager.get_secret.return_value = 'my-secret-value'  # Plaintext
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid-1234'
+            # No password provided
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['secret'], 'my-secret-value')
+        self.assertIn('retrieved and deleted', body['message'])
+
+    def test_encrypt_decrypt_functions(self):
+        """Test encryption and decryption functions directly."""
+        from lambda_handler_secrets import encrypt_secret, decrypt_secret
+        
+        # Test basic encryption/decryption
+        original_secret = 'This is a test secret!'
+        password = 'test-password-123'
+        
+        encrypted = encrypt_secret(original_secret, password)
+        self.assertNotEqual(encrypted, original_secret)
+        self.assertIsInstance(encrypted, str)
+        
+        decrypted = decrypt_secret(encrypted, password)
+        self.assertEqual(decrypted, original_secret)
+        
+        # Test with different password fails
+        with self.assertRaises(ValueError) as context:
+            decrypt_secret(encrypted, 'wrong-password')
+        self.assertIn('Decryption failed', str(context.exception))
+
 
 
 if __name__ == '__main__':
