@@ -19,7 +19,7 @@ def lambda_handler(event, context):
     
     Expected event format:
     {
-        "image": "nmap",
+        "image": "kali-rolling",
         "targets": ["merabytes.com", "uber.com", "facebook.com"],
         "task": "nmap -iL input -p 0-1000"
     }
@@ -27,7 +27,7 @@ def lambda_handler(event, context):
     Or with body wrapper:
     {
         "body": {
-            "image": "nmap",
+            "image": "kali-rolling",
             "targets": ["merabytes.com", "uber.com", "facebook.com"],
             "task": "nmap -iL input -p 0-1000"
         }
