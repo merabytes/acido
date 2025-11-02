@@ -31,7 +31,7 @@ ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
 
 parser = argparse.ArgumentParser()
 
-# Add subparsers for 'create' subcommand
+# Add subparsers for Docker-like subcommands
 subparsers = parser.add_subparsers(dest='subcommand', help='Subcommands')
 
 # Create subcommand
@@ -42,14 +42,45 @@ create_parser.add_argument('--image', dest='base_image_url', help='Full Docker i
 # Configure subcommand (alias for -c/--config)
 configure_parser = subparsers.add_parser('configure', help='Configure acido (alias for -c/--config)')
 
-# Regular arguments
+# Fleet subcommand (Docker-like syntax)
+fleet_parser = subparsers.add_parser('fleet', help='Create and manage fleet of containers')
+fleet_parser.add_argument('fleet_name', help='Fleet name')
+fleet_parser.add_argument('-n', '--num-instances', dest='num_instances', type=int, default=1, help='Number of instances')
+fleet_parser.add_argument('-im', '--image', dest='image_name', default='ubuntu', help='Image name')
+fleet_parser.add_argument('-t', '--task', dest='task', help='Command to execute')
+fleet_parser.add_argument('-i', '--input-file', dest='input_file', help='Input file for task')
+fleet_parser.add_argument('-w', '--wait', dest='wait', type=int, help='Max timeout')
+fleet_parser.add_argument('-o', '--output', dest='write_to_file', help='Save output to file')
+fleet_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
+fleet_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
+fleet_parser.add_argument('--rm-when-done', dest='rm_when_done', action='store_true', help='Remove after completion')
+
+# List subcommand (Docker-like: acido ls)
+ls_parser = subparsers.add_parser('ls', help='List all container instances')
+
+# Remove subcommand (Docker-like: acido rm)
+rm_parser = subparsers.add_parser('rm', help='Remove container instances')
+rm_parser.add_argument('name', help='Container group name or pattern to remove')
+
+# Select subcommand
+select_parser = subparsers.add_parser('select', help='Select instances by name/regex')
+select_parser.add_argument('pattern', help='Name or regex pattern to select')
+
+# Exec subcommand
+exec_parser = subparsers.add_parser('exec', help='Execute command on selected instances')
+exec_parser.add_argument('command', help='Command to execute')
+exec_parser.add_argument('-i', '--input-file', dest='input_file', help='Input file')
+exec_parser.add_argument('-o', '--output', dest='write_to_file', help='Output file')
+exec_parser.add_argument('-w', '--wait', dest='wait', type=int, default=60, help='Max retries')
+
+# Regular arguments (for backward compatibility)
 parser.add_argument("-c", "--config",
                     dest="config",
                     help="Start configuration of acido.",
                     action='store_true')
 parser.add_argument("-f", "--fleet",
                     dest="fleet",
-                    help="Create new fleet.",
+                    help="Create new fleet (deprecated: use 'acido fleet' subcommand).",
                     action='store')
 parser.add_argument("-im", "--image",
                     dest="image_name",
@@ -97,11 +128,11 @@ parser.add_argument("-s", "--select",
                     action='store')
 parser.add_argument("-l", "--list",
                     dest="list_instances",
-                    help="List all instances.",
+                    help="List all instances (deprecated: use 'acido ls').",
                     action='store_true')
 parser.add_argument("-r", "--rm",
                     dest="remove",
-                    help="Remove instances matching name/regex.",
+                    help="Remove instances matching name/regex (deprecated: use 'acido rm').",
                     action='store')
 parser.add_argument("-in", "--interactive",
                     dest="interactive",
@@ -150,6 +181,30 @@ if args.subcommand == 'create':
 # Handle 'configure' subcommand - map it to config flag for consistency
 if args.subcommand == 'configure':
     args.config = True
+
+# Handle 'fleet' subcommand - map to old-style flags
+if args.subcommand == 'fleet':
+    if not hasattr(args, 'fleet') or not args.fleet:
+        args.fleet = args.fleet_name
+
+# Handle 'ls' subcommand
+if args.subcommand == 'ls':
+    args.list_instances = True
+
+# Handle 'rm' subcommand
+if args.subcommand == 'rm':
+    if not hasattr(args, 'remove') or not args.remove:
+        args.remove = args.name
+
+# Handle 'select' subcommand
+if args.subcommand == 'select':
+    if not hasattr(args, 'select') or not args.select:
+        args.select = args.pattern
+
+# Handle 'exec' subcommand
+if args.subcommand == 'exec':
+    if not hasattr(args, 'exec_cmd') or not args.exec_cmd:
+        args.exec_cmd = args.command
 
 instances_outputs = {}
 

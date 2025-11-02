@@ -88,7 +88,18 @@ acido create nmap
 acido create nuclei --image projectdiscovery/nuclei:latest
 ```
 
-3. Run distributed scan:
+3. Run distributed scan (Docker-like syntax):
+```bash
+acido fleet nmap-scan \
+    -n 3 \
+    -im nmap \
+    -t 'nmap -iL input -p 0-1000' \
+    -i targets.txt \
+    -o output \
+    --rm-when-done
+```
+
+Or using the classic syntax (still supported):
 ```bash
 acido -f nmap-scan \
     -n 3 \
@@ -100,7 +111,7 @@ acido -f nmap-scan \
 ```
 
 Parameters:
-- `-f` Fleet name
+- `fleet` / `-f` Fleet name
 - `-n` Number of container instances
 - `-im` Image name (e.g., 'nmap', 'nuclei:latest', or full URL)
 - `-t` Command to execute
@@ -112,24 +123,69 @@ Results saved to `output.json` and `all_output.txt`.
 
 ## CLI Reference
 
+Acido now supports Docker-like subcommands for a more intuitive experience:
+
+### Subcommands
+
+```bash
+# Create acido-compatible image
+acido create <name> [--image <full-image-url>]
+
+# Configure acido
+acido configure
+
+# Deploy a fleet of containers
+acido fleet <fleet-name> [options]
+
+# List all container instances
+acido ls
+
+# Remove container instances
+acido rm <name-or-pattern>
+
+# Select instances by pattern
+acido select <pattern>
+
+# Execute command on selected instances  
+acido exec <command> [options]
+```
+
+### Fleet Command Options
+
+```bash
+acido fleet <fleet-name> [options]
+
+Options:
+  -n, --num-instances NUM   Number of container instances
+  -im, --image IMAGE        Image name (e.g., 'nmap', 'nuclei:latest')
+  -t, --task TASK          Command to execute
+  -i, --input-file FILE    Input file (auto-split across containers)
+  -w, --wait SECONDS       Max timeout in seconds
+  -o, --output FILE        Save output to file
+  --format FORMAT          Output format: txt or json (default: txt)
+  -q, --quiet              Quiet mode with progress bar
+  --rm-when-done          Remove containers after completion
+```
+
+### Legacy Flags (Still Supported)
+
+For backward compatibility, all original flags are still supported:
+
 ```
 usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP] 
              [--ip] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] 
              [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
              [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
-             {create,configure}
+             {create,configure,fleet,ls,rm,select,exec}
 
 positional arguments:
-  {create,configure}    Subcommands
-    create              Create acido-compatible image from base image
-                        Usage: acido create <name> [--image <full-image-url>]
-    configure           Configure acido (alias for -c/--config)
-                        Usage: acido configure
+  {create,configure,fleet,ls,rm,select,exec}
+                        Subcommands
 
 optional arguments:
   -h, --help            Show help message
   -c, --config          Configure acido
-  -f FLEET              Fleet name
+  -f FLEET              Fleet name (deprecated: use 'acido fleet' subcommand)
   -im IMAGE_NAME        Deploy specific image
   --create IMAGE        Create acido-compatible image (alternative syntax)
   --create-ip NAME      Create IPv4 address for routing
@@ -140,8 +196,8 @@ optional arguments:
   -i INPUT_FILE         Input file for task
   -w WAIT               Max timeout
   -s SELECT             Select instances by name/regex
-  -l, --list            List all instances
-  -r REMOVE             Remove instances by name/regex
+  -l, --list            List all instances (deprecated: use 'acido ls')
+  -r REMOVE             Remove instances by name/regex (deprecated: use 'acido rm')
   -in, --interactive    Interactive session
   -sh SHELL             Execute and upload to blob
   -d DOWNLOAD           Download from blob
@@ -154,8 +210,19 @@ optional arguments:
 
 ### Distributed Nmap Scan
 
-Scan 1,000 hosts with 20 containers:
+Scan 1,000 hosts with 20 containers using new Docker-like syntax:
 
+```bash
+acido fleet nmap-fleet \
+    -n 20 \
+    -im nmap \
+    -t 'nmap -iL input -p- --min-rate 1000' \
+    -i targets.txt \
+    -o output \
+    --rm-when-done
+```
+
+Or using classic syntax:
 ```bash
 acido -f nmap-fleet \
     -n 20 \
@@ -171,7 +238,7 @@ acido -f nmap-fleet \
 Scan 10,000 URLs with 50 containers:
 
 ```bash
-acido -f nuclei-scan \
+acido fleet nuclei-scan \
     -n 50 \
     -im nuclei \
     -t 'nuclei -list input -t /nuclei-templates/' \
@@ -184,12 +251,29 @@ acido -f nuclei-scan \
 Scan entire network with 100 containers:
 
 ```bash
-acido -f masscan \
+acido fleet masscan \
     -n 100 \
     -im masscan \
     -t 'masscan -iL input -p0-65535 --rate 10000' \
     -i networks.txt \
     -o masscan-results
+```
+
+### Fleet Management
+
+List all running container instances:
+```bash
+acido ls
+```
+
+Remove specific fleet:
+```bash
+acido rm nmap-fleet
+```
+
+Remove all fleets matching pattern:
+```bash
+acido rm 'scan-*'
 ```
 
 ### Single IP Routing
@@ -201,8 +285,8 @@ Route all containers through one IP for whitelisting:
 acido --create-ip pentest-ip
 
 # Deploy with IP routing
-acido -f scan -n 50 --ip \
-    --image myregistry.azurecr.io/nmap:latest \
+acido fleet scan -n 50 --ip \
+    -im nmap \
     -t 'nmap -iL input -p-' \
     -i targets.txt
 ```
