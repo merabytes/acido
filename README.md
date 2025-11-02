@@ -12,6 +12,7 @@ Acido (**A**zure **C**ontainer **I**nstance **D**istributed **O**perations) enab
 - [CLI Reference](#cli-reference)
 - [Examples](#examples)
 - [AWS Lambda Support](#aws-lambda-support)
+- [Secrets Sharing Service](#secrets-sharing-service)
 - [Credits](#credits)
 
 ## Why Acido?
@@ -364,6 +365,39 @@ Acido can be deployed as an AWS Lambda function, enabling serverless security sc
 - See [LAMBDA.md](LAMBDA.md) for complete deployment and usage instructions
 - Example payload: [example_lambda_payload.json](example_lambda_payload.json)
 - Automatic deployment workflow: [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml)
+
+## Secrets Sharing Service
+
+Acido includes a OneTimeSecret-like service for secure secrets sharing via AWS Lambda and Azure KeyVault.
+
+**Key Features:**
+- Generate UUID-based secrets
+- One-time access (auto-delete after retrieval)
+- Secure storage in Azure KeyVault
+- Serverless AWS Lambda deployment
+
+**Quick Example:**
+
+Create a secret:
+```json
+{
+  "action": "create",
+  "secret": "Your secret message here"
+}
+```
+
+Retrieve the secret (one-time only):
+```json
+{
+  "action": "retrieve",
+  "uuid": "generated-uuid-from-create"
+}
+```
+
+**Documentation:**
+- See [SECRETS.md](SECRETS.md) for complete documentation
+- Example payloads: [example_lambda_secrets_create_payload.json](example_lambda_secrets_create_payload.json) and [example_lambda_secrets_retrieve_payload.json](example_lambda_secrets_retrieve_payload.json)
+- Automatic deployment workflow: [.github/workflows/deploy-lambda-secrets.yml](.github/workflows/deploy-lambda-secrets.yml)
 
 ## Credits
 
