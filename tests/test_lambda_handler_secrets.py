@@ -385,10 +385,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Clean up
         del os.environ['CF_SECRET_KEY']
 
-    @patch('lambda_handler_secrets.requests.post')
+    @patch('acido.utils.turnstile_utils.requests.post')
     def test_validate_turnstile_success(self, mock_post):
         """Test Turnstile validation with successful response."""
-        from lambda_handler_secrets import validate_turnstile
+        from acido.utils.turnstile_utils import validate_turnstile
         
         # Setup environment and mock
         os.environ['CF_SECRET_KEY'] = 'test-cf-secret'
@@ -409,10 +409,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Clean up
         del os.environ['CF_SECRET_KEY']
 
-    @patch('lambda_handler_secrets.requests.post')
+    @patch('acido.utils.turnstile_utils.requests.post')
     def test_validate_turnstile_failure(self, mock_post):
         """Test Turnstile validation with failed response."""
-        from lambda_handler_secrets import validate_turnstile
+        from acido.utils.turnstile_utils import validate_turnstile
         
         # Setup environment and mock
         os.environ['CF_SECRET_KEY'] = 'test-cf-secret'
@@ -430,7 +430,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
 
     def test_validate_turnstile_no_secret_key(self):
         """Test Turnstile validation when CF_SECRET_KEY is not set."""
-        from lambda_handler_secrets import validate_turnstile
+        from acido.utils.turnstile_utils import validate_turnstile
         
         # Ensure CF_SECRET_KEY is not set
         if 'CF_SECRET_KEY' in os.environ:
@@ -441,10 +441,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Should return True (skip validation)
         self.assertTrue(result)
 
-    @patch('lambda_handler_secrets.requests.post')
+    @patch('acido.utils.turnstile_utils.requests.post')
     def test_validate_turnstile_network_error(self, mock_post):
         """Test Turnstile validation when network error occurs."""
-        from lambda_handler_secrets import validate_turnstile
+        from acido.utils.turnstile_utils import validate_turnstile
         
         # Setup environment and mock
         os.environ['CF_SECRET_KEY'] = 'test-cf-secret'
@@ -495,7 +495,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
     @patch('lambda_handler_secrets.VaultManager')
     def test_retrieve_secret_with_correct_password(self, mock_vault_manager_class, mock_validate):
         """Test retrieving an encrypted secret with correct password."""
-        from lambda_handler_secrets import encrypt_secret
+        from acido.utils.crypto_utils import encrypt_secret
         
         # Setup mocks
         mock_validate.return_value = True
@@ -528,7 +528,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
     @patch('lambda_handler_secrets.VaultManager')
     def test_retrieve_secret_with_wrong_password(self, mock_vault_manager_class, mock_validate):
         """Test retrieving an encrypted secret with wrong password."""
-        from lambda_handler_secrets import encrypt_secret
+        from acido.utils.crypto_utils import encrypt_secret
         
         # Setup mocks
         mock_validate.return_value = True
@@ -617,7 +617,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
 
     def test_encrypt_decrypt_functions(self):
         """Test encryption and decryption functions directly."""
-        from lambda_handler_secrets import encrypt_secret, decrypt_secret
+        from acido.utils.crypto_utils import encrypt_secret, decrypt_secret
         
         # Test basic encryption/decryption
         original_secret = 'This is a test secret!'

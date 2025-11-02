@@ -5,13 +5,57 @@ This module provides Lambda function compatibility for acido, allowing it to be
 invoked via AWS Lambda with JSON payloads containing scan configurations.
 """
 
-import json
 import os
-import sys
 import tempfile
 import traceback
 from acido.cli import Acido
 from acido.utils.lambda_safe_pool import ThreadPoolShim
+from acido.utils.lambda_utils import (
+    parse_lambda_event,
+    build_response,
+    build_error_response,
+    validate_required_fields
+)
+
+def _validate_targets(targets):
+    """Validate targets parameter."""
+    return targets and isinstance(targets, list)
+
+
+def _create_input_file(targets):
+    """Create temporary input file with targets."""
+    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
+        f.write('\n'.join(targets))
+        return f.name
+
+
+def _cleanup_file(filepath):
+    """Clean up temporary file, ignoring errors."""
+    try:
+        os.unlink(filepath)
+    except (OSError, FileNotFoundError):
+        pass
+
+
+def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_file):
+    """Execute fleet operation and return response and outputs."""
+    pool = ThreadPoolShim(processes=30)
+    full_image_url = acido.build_image_url(image_name)
+    
+    return acido.fleet(
+        fleet_name=fleet_name,
+        instance_num=num_instances,
+        image_name=full_image_url,
+        scan_cmd=task,
+        input_file=input_file,
+        wait=None,
+        write_to_file=None,
+        output_format='json',
+        interactive=False,
+        quiet=True,
+        pool=pool
+    )
+
 
 def lambda_handler(event, context):
     """
@@ -49,38 +93,23 @@ def lambda_handler(event, context):
     Returns:
         dict: Response with statusCode and body containing fleet outputs
     """
-    
     # Parse event
-    if isinstance(event, str):
-        event = json.loads(event)
+    event = parse_lambda_event(event)
     
-    # Handle body wrapper (e.g., from API Gateway)
-    # If event has a "body" key, use that, otherwise use the event itself
-    if "body" in event:
-        event = event.get("body", {})
-        # If body was a string, parse it
-        if isinstance(event, str):
-            event = json.loads(event)
+    # Validate event body exists
+    if not event:
+        return build_error_response(
+            'Missing event body. Expected fields: image, targets, task'
+        )
     
     # Validate required fields
-    if not event:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({
-                'error': 'Missing event body. Expected fields: image, targets, task'
-            })
-        }
-    
     required_fields = ['image', 'targets', 'task']
-    missing_fields = [field for field in required_fields if field not in event]
+    is_valid, missing_fields = validate_required_fields(event, required_fields)
     
-    if missing_fields:
-        return {
-            'statusCode': 400,
-            'body': json.dumps({
-                'error': f'Missing required fields: {", ".join(missing_fields)}'
-            })
-        }
+    if not is_valid:
+        return build_error_response(
+            f'Missing required fields: {", ".join(missing_fields)}'
+        )
     
     # Extract parameters
     image_name = event.get('image')
@@ -90,66 +119,35 @@ def lambda_handler(event, context):
     num_instances = event.get('num_instances', len(targets) if targets else 1)
     
     # Validate targets
-    if not targets or not isinstance(targets, list):
-        return {
-            'statusCode': 400,
-            'body': json.dumps({
-                'error': 'targets must be a non-empty list'
-            })
-        }
+    if not _validate_targets(targets):
+        return build_error_response('targets must be a non-empty list')
     
     try:
         # Create temporary input file with targets
-        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
-            input_file = f.name
-            f.write('\n'.join(targets))
+        input_file = _create_input_file(targets)
         
         # Initialize acido with environment-based configuration
-        # The Acido class will automatically load from environment variables
         acido = Acido(check_config=True)
         
-        # Create thread pool for fleet operations
-        pool = ThreadPoolShim(processes=30)
-        
-        # Build full image URL
-        full_image_url = acido.build_image_url(image_name)
-        
         # Execute fleet operation
-        response, outputs = acido.fleet(
-            fleet_name=fleet_name,
-            instance_num=num_instances,
-            image_name=full_image_url,
-            scan_cmd=task,
-            input_file=input_file,
-            wait=None,
-            write_to_file=None,
-            output_format='json',
-            interactive=False,
-            quiet=True,
-            pool=pool  # Pass pool as parameter instead of using global
+        response, outputs = _execute_fleet(
+            acido, fleet_name, num_instances, image_name, task, input_file
         )
         
         # Clean up temporary input file
-        try:
-            os.unlink(input_file)
-        except (OSError, FileNotFoundError) as e:
-            # Log but don't fail if cleanup fails
-            pass
+        _cleanup_file(input_file)
         
         # Clean up containers if requested
         if event.get('rm_when_done', True):
             acido.rm(fleet_name if num_instances <= 10 else f'{fleet_name}*')
         
         # Return successful response
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'fleet_name': fleet_name,
-                'instances': num_instances,
-                'image': image_name,
-                'outputs': outputs
-            })
-        }
+        return build_response(200, {
+            'fleet_name': fleet_name,
+            'instances': num_instances,
+            'image': image_name,
+            'outputs': outputs
+        })
         
     except Exception as e:
         # Return error response
@@ -158,8 +156,4 @@ def lambda_handler(event, context):
             'type': type(e).__name__,
             'traceback': traceback.format_exc()
         }
-        
-        return {
-            'statusCode': 500,
-            'body': json.dumps(error_details)
-        }
+        return build_response(500, error_details)
