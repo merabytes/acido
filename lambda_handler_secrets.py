@@ -228,8 +228,20 @@ def lambda_handler(event, context):
     if isinstance(event, str):
         event = json.loads(event)
     
-    # Handle OPTIONS preflight request
-    if event.get("requestContext", {}).get("http", {}).get("method") == "OPTIONS":
+    # Handle OPTIONS preflight request - check multiple possible locations for HTTP method
+    http_method = None
+    if "requestContext" in event:
+        # Lambda Function URL format
+        if "http" in event["requestContext"]:
+            http_method = event["requestContext"]["http"].get("method")
+        # API Gateway format
+        elif "httpMethod" in event["requestContext"]:
+            http_method = event["requestContext"].get("httpMethod")
+    # Direct httpMethod in event (some API Gateway formats)
+    if not http_method and "httpMethod" in event:
+        http_method = event.get("httpMethod")
+    
+    if http_method == "OPTIONS":
         return {
             "statusCode": 200,
             "headers": cors_headers,
