@@ -77,7 +77,7 @@ jobs:
             IMAGE_REGISTRY_SERVER=${{ secrets.IMAGE_REGISTRY_SERVER }},
             IMAGE_REGISTRY_USERNAME=${{ secrets.IMAGE_REGISTRY_USERNAME }},
             IMAGE_REGISTRY_PASSWORD=${{ secrets.IMAGE_REGISTRY_PASSWORD }},
-            STORAGE_ACCOUNT_NAME=${{ secrets.STORAGE_ACCOUNT_NAME }}
+            STORAGE_ACCOUNT_NAME=acido
           }"
 
     - name: Wait for environment update to complete
