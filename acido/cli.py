@@ -426,11 +426,12 @@ class Acido(object):
             for cg_n, ins_num in enumerate(instance_num_groups):
                 last_instance = len(ins_num)
                 env_vars = {
-                    'RG': self.rg,
+                    'AZURE_RESOURCE_GROUP': self.rg,
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
                     'STORAGE_ACCOUNT_NAME': self.storage_account,
+                    'MANAGED_IDENTITY_ID': self.user_assigned.get('id', None),
                     'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
                         "DefaultEndpointsProtocol=https;"
@@ -459,11 +460,12 @@ class Acido(object):
                 input_files = [self.save_input(f) for f in input_filenames]
 
             env_vars = {
-                    'RG': self.rg,
+                    'AZURE_RESOURCE_GROUP': self.rg,
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
                     'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
                     'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
                     'STORAGE_ACCOUNT_NAME': self.storage_account,
+                    'MANAGED_IDENTITY_ID': self.user_assigned.get('id', None),
                     'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
                     'BLOB_CONNECTION': (
                         "DefaultEndpointsProtocol=https;"
