@@ -19,7 +19,7 @@ from acido.utils.lambda_utils import (
     extract_http_method,
     extract_remote_ip
 )
-from acido.utils.crypto_utils import encrypt_secret, decrypt_secret
+from acido.utils.crypto_utils import encrypt_secret, decrypt_secret, is_encrypted
 from acido.utils.turnstile_utils import validate_turnstile
 
 
@@ -115,6 +115,35 @@ def _handle_retrieve_secret(event, vault_manager):
     }, CORS_HEADERS)
 
 
+def _handle_check_secret(event, vault_manager):
+    """Handle checking if a secret is encrypted without retrieving it."""
+    secret_uuid = event.get('uuid')
+    
+    if not secret_uuid:
+        return build_error_response(
+            'Missing required field: uuid',
+            headers=CORS_HEADERS
+        )
+    
+    # Check if secret exists
+    if not vault_manager.secret_exists(secret_uuid):
+        return build_response(404, {
+            'error': 'Secret not found or already accessed'
+        }, CORS_HEADERS)
+    
+    # Retrieve the secret value (without deleting)
+    secret_value = vault_manager.get_secret(secret_uuid)
+    
+    # Check if the secret is encrypted
+    encrypted = is_encrypted(secret_value)
+    
+    # Return check result
+    return build_response(200, {
+        'encrypted': encrypted,
+        'requires_password': encrypted
+    }, CORS_HEADERS)
+
+
 def lambda_handler(event, context):
     """
     AWS Lambda handler for secrets sharing service.
@@ -132,6 +161,13 @@ def lambda_handler(event, context):
         "action": "retrieve",
         "uuid": "generated-uuid-here",
         "password": "password-if-encrypted",
+        "turnstile_token": "cloudflare-turnstile-token"
+    }
+    
+    Expected event format for checking if a secret is encrypted:
+    {
+        "action": "check",
+        "uuid": "generated-uuid-here",
         "turnstile_token": "cloudflare-turnstile-token"
     }
     
@@ -177,7 +213,7 @@ def lambda_handler(event, context):
     # Validate required fields
     if not event:
         return build_error_response(
-            'Missing event body. Expected fields: action, secret (for create) or uuid (for retrieve)',
+            'Missing event body. Expected fields: action, secret (for create), uuid (for retrieve/check)',
             headers=CORS_HEADERS
         )
     
@@ -188,13 +224,13 @@ def lambda_handler(event, context):
         return _handle_healthcheck()
     
     # Validate action
-    if not action or action not in ['create', 'retrieve']:
+    if not action or action not in ['create', 'retrieve', 'check']:
         return build_error_response(
-            'Invalid or missing action. Must be "create", "retrieve", or "healthcheck"',
+            'Invalid or missing action. Must be "create", "retrieve", "check", or "healthcheck"',
             headers=CORS_HEADERS
         )
     
-    # Validate CloudFlare Turnstile token (required for create/retrieve)
+    # Validate CloudFlare Turnstile token (required for create/retrieve/check)
     turnstile_token = event.get('turnstile_token')
     
     if not turnstile_token:
@@ -219,6 +255,8 @@ def lambda_handler(event, context):
             return _handle_create_secret(event, vault_manager)
         elif action == 'retrieve':
             return _handle_retrieve_secret(event, vault_manager)
+        elif action == 'check':
+            return _handle_check_secret(event, vault_manager)
         
     except Exception as e:
         # Return error response

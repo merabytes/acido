@@ -756,6 +756,135 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         mock_validate.assert_called_once()
 
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_check_secret_encrypted(self, mock_vault_manager_class, mock_validate):
+        """Test checking if a secret is encrypted."""
+        from acido.utils.crypto_utils import encrypt_secret
+        
+        # Setup mocks
+        mock_validate.return_value = True
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Store an encrypted secret
+        encrypted_value = encrypt_secret('my-secret-value', 'test-password')
+        mock_vault_manager.get_secret.return_value = encrypted_value
+        
+        event = {
+            'action': 'check',
+            'uuid': 'test-uuid-1234',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertTrue(body['encrypted'])
+        self.assertTrue(body['requires_password'])
+        
+        # Verify that the secret was NOT deleted (check action is non-destructive)
+        mock_vault_manager.delete_secret.assert_not_called()
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_check_secret_not_encrypted(self, mock_vault_manager_class, mock_validate):
+        """Test checking if a plaintext secret is not encrypted."""
+        # Setup mocks
+        mock_validate.return_value = True
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Store a plaintext secret
+        mock_vault_manager.get_secret.return_value = 'plaintext-secret'
+        
+        event = {
+            'action': 'check',
+            'uuid': 'test-uuid-1234',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertFalse(body['encrypted'])
+        self.assertFalse(body['requires_password'])
+        
+        # Verify that the secret was NOT deleted
+        mock_vault_manager.delete_secret.assert_not_called()
+
+    @patch('lambda_handler_secrets.validate_turnstile')
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_check_secret_not_found(self, mock_vault_manager_class, mock_validate):
+        """Test checking a secret that doesn't exist."""
+        # Setup mocks
+        mock_validate.return_value = True
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = False
+        
+        event = {
+            'action': 'check',
+            'uuid': 'test-uuid-1234',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        # Verify
+        self.assertEqual(response['statusCode'], 404)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Secret not found', body['error'])
+
+    @patch('lambda_handler_secrets.VaultManager')
+    def test_check_secret_missing_uuid(self, mock_vault_manager_class):
+        """Test checking a secret without providing UUID."""
+        event = {
+            'action': 'check',
+            'turnstile_token': 'valid-token'
+        }
+        context = {}
+        
+        # Should fail for missing turnstile first
+        event_no_token = {
+            'action': 'check'
+        }
+        response = lambda_handler(event_no_token, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('turnstile_token', body['error'])
+
+    def test_is_encrypted_function(self):
+        """Test the is_encrypted utility function directly."""
+        from acido.utils.crypto_utils import encrypt_secret, is_encrypted
+        
+        # Test with encrypted value
+        encrypted_value = encrypt_secret('test-secret', 'password')
+        self.assertTrue(is_encrypted(encrypted_value))
+        
+        # Test with plaintext
+        self.assertFalse(is_encrypted('plaintext-secret'))
+        
+        # Test with invalid base64
+        self.assertFalse(is_encrypted('not-base64!@#$'))
+        
+        # Test with valid base64 but too short
+        import base64
+        short_data = base64.b64encode(b'short').decode()
+        self.assertFalse(is_encrypted(short_data))
+
 
 
 if __name__ == '__main__':

@@ -55,6 +55,39 @@ def encrypt_secret(secret_value: str, password: str) -> str:
     return base64.b64encode(salt + iv + encrypted).decode()
 
 
+def is_encrypted(value: str) -> bool:
+    """
+    Check if a value appears to be encrypted.
+    
+    This function checks if a value has the expected format of an encrypted secret:
+    - Valid base64 encoding
+    - Minimum length (salt + IV + at least one block = 48 bytes)
+    
+    Args:
+        value: The value to check
+        
+    Returns:
+        bool: True if the value appears to be encrypted, False otherwise
+    """
+    try:
+        # Try to decode as base64
+        decoded_data = base64.b64decode(value.encode())
+        
+        # Check minimum length (16 bytes salt + 16 bytes IV + 16 bytes minimum ciphertext)
+        if len(decoded_data) < 48:
+            return False
+        
+        # Check that the length is at least reasonable for encrypted data
+        # Encrypted data should have salt (16) + IV (16) + ciphertext (multiple of 16)
+        if (len(decoded_data) - 32) % 16 != 0:
+            return False
+        
+        return True
+    except Exception:
+        # If base64 decoding fails or any other error, it's not encrypted
+        return False
+
+
 def decrypt_secret(encrypted_value: str, password: str) -> str:
     """
     Decrypt a secret using AES-256 with a password.
