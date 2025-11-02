@@ -260,28 +260,28 @@ python -m unittest test_lambda_handler_secrets -v
 ```bash
 curl -X POST https://<lambda-url>/secrets \
   -H "Content-Type: application/json" \
-  -d @example_lambda_secrets_create_payload.json
+  -d @examples/example_lambda_secrets_create_payload.json
 ```
 
 2. **Retrieve the secret (using UUID from step 1):**
 ```bash
 curl -X POST https://<lambda-url>/secrets \
   -H "Content-Type: application/json" \
-  -d @example_lambda_secrets_retrieve_payload.json
+  -d @examples/example_lambda_secrets_retrieve_payload.json
 ```
 
 3. **Try retrieving again (should fail with 404):**
 ```bash
 curl -X POST https://<lambda-url>/secrets \
   -H "Content-Type: application/json" \
-  -d @example_lambda_secrets_retrieve_payload.json
+  -d @examples/example_lambda_secrets_retrieve_payload.json
 ```
 
 ## Example Payloads
 
 Example request payloads are provided:
-- `example_lambda_secrets_create_payload.json` - Create a secret
-- `example_lambda_secrets_retrieve_payload.json` - Retrieve a secret
+- `examples/example_lambda_secrets_create_payload.json` - Create a secret
+- `examples/example_lambda_secrets_retrieve_payload.json` - Retrieve a secret
 
 ## Security Considerations
 

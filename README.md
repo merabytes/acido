@@ -363,7 +363,7 @@ Acido can be deployed as an AWS Lambda function, enabling serverless security sc
 
 **Documentation:**
 - See [LAMBDA.md](LAMBDA.md) for complete deployment and usage instructions
-- Example payload: [example_lambda_payload.json](example_lambda_payload.json)
+- Example payload: [examples/example_lambda_payload.json](examples/example_lambda_payload.json)
 - Automatic deployment workflow: [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml)
 
 ## Secrets Sharing Service
@@ -397,7 +397,7 @@ Retrieve the secret (one-time only):
 
 **Documentation:**
 - See [SECRETS.md](SECRETS.md) for complete documentation
-- Example payloads: [example_lambda_secrets_create_payload.json](example_lambda_secrets_create_payload.json) and [example_lambda_secrets_retrieve_payload.json](example_lambda_secrets_retrieve_payload.json)
+- Example payloads: [examples/example_lambda_secrets_create_payload.json](examples/example_lambda_secrets_create_payload.json) and [examples/example_lambda_secrets_retrieve_payload.json](examples/example_lambda_secrets_retrieve_payload.json)
 - Automatic deployment workflow: [.github/workflows/deploy-lambda-secrets.yml](.github/workflows/deploy-lambda-secrets.yml)
 
 ## Credits
