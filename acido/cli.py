@@ -828,7 +828,7 @@ class Acido(object):
             if 'alpine' in os_info:
                 if not quiet:
                     print(good('Detected Alpine Linux'))
-                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': True}
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
             
             # Check for Debian/Ubuntu/Kali
             if 'debian' in os_info or 'ubuntu' in os_info or 'kali' in os_info:
@@ -865,7 +865,7 @@ class Acido(object):
             if 'apk' in pkg_managers:
                 if not quiet:
                     print(good('Detected Alpine Linux (via apk)'))
-                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': True}
+                return {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
             elif 'apt-get' in pkg_managers:
                 if not quiet:
                     print(good('Detected Debian/Ubuntu (via apt-get)'))
