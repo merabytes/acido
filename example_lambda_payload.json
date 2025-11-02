@@ -1,0 +1,9 @@
+{
+  "image": "nmap",
+  "targets": [
+    "merabytes.com",
+    "uber.com",
+    "facebook.com"
+  ],
+  "task": "nmap -iL input -p 0-1000"
+}
