@@ -111,10 +111,6 @@ def lambda_handler(event, context):
         # Create thread pool for fleet operations
         pool = ThreadPoolShim(processes=30)
         
-        # Make pool available globally for the fleet operation
-        import acido.cli as cli_module
-        cli_module.pool = pool
-        
         # Build full image URL
         full_image_url = acido.build_image_url(image_name)
         
@@ -129,7 +125,8 @@ def lambda_handler(event, context):
             write_to_file=None,
             output_format='json',
             interactive=False,
-            quiet=True
+            quiet=True,
+            pool=pool  # Pass pool as parameter instead of using global
         )
         
         # Clean up temporary input file

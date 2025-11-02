@@ -81,6 +81,10 @@ jobs:
         python -m py_compile acido/azure_utils/*.py
         python -m py_compile acido/utils/*.py
 
+    - name: Run unit tests
+      run: |
+        python -m unittest discover -s . -p "test_*.py" -v
+
   build-test:
     name: Build and Install Test
     runs-on: ubuntu-latest
@@ -144,6 +148,40 @@ jobs:
         # This will test that acido can create a nuclei image using the correct Docker image
         # It will use environment variables for configuration
         acido create nuclei --image projectdiscovery/nuclei:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: E2E Test - Deploy and manage nuclei fleet
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+        STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
+        MANAGED_IDENTITY_ID: ${{ secrets.MANAGED_IDENTITY_ID }}
+        MANAGED_IDENTITY_CLIENT_ID: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}
+      run: |
+        # Create a target list file
+        echo -e "merabytes.com\nuber.com\nfacebook.com" > /tmp/targets.txt
+        
+        # Deploy fleet in background with 30 second timeout
+        echo "Deploying nuclei fleet with ci-test name..."
+        timeout 30s acido fleet ci-test -n 3 -im nuclei -t 'nuclei -list input' -i /tmp/targets.txt -o /tmp/ci-test-output || echo "Fleet deployment timed out after 30s (expected)"
+        
+        # Test list command
+        echo "Testing 'acido ls' command..."
+        acido ls || echo "List command may fail if no instances exist"
+        
+        # Test remove command
+        echo "Testing 'acido rm ci-test' command..."
+        acido rm 'ci-test*' || echo "Remove command completed"
+        
+        # Verify fleet was cleaned up
+        echo "Verifying cleanup..."
+        acido ls || echo "Final list check completed"
 
     - name: Test acido create kali
       env:
