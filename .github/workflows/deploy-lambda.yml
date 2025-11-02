@@ -1,0 +1,92 @@
+name: Deploy to AWS Lambda
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-1
+  ECR_REPOSITORY: acido
+  ECR_REGISTRY: 318257425368.dkr.ecr.eu-west-1.amazonaws.com
+  LAMBDA_FUNCTION_NAME: Acido
+
+jobs:
+  deploy:
+    name: Build and Deploy to Lambda
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build, tag, and push image to Amazon ECR
+      id: build-image
+      env:
+        IMAGE_TAG: ${{ github.sha }}
+      run: |
+        # Build the Docker image
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG -f Dockerfile.lambda .
+        docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        # Push the images to ECR
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        # Output the image URI for next steps
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+    - name: Update Lambda function with new image
+      run: |
+        aws lambda update-function-code \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+          --image-uri ${{ steps.build-image.outputs.image }}
+
+    - name: Wait for Lambda update to complete
+      run: |
+        echo "Waiting for Lambda function update to complete..."
+        aws lambda wait function-updated \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+        echo "Lambda function update completed successfully"
+
+    - name: Update Lambda environment variables
+      run: |
+        aws lambda update-function-configuration \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+          --environment "Variables={
+            AZURE_TENANT_ID=${{ secrets.AZURE_TENANT_ID }},
+            AZURE_CLIENT_ID=${{ secrets.AZURE_CLIENT_ID }},
+            AZURE_CLIENT_SECRET=${{ secrets.AZURE_CLIENT_SECRET }},
+            AZURE_RESOURCE_GROUP=${{ secrets.AZURE_RESOURCE_GROUP }},
+            IMAGE_REGISTRY_SERVER=${{ secrets.IMAGE_REGISTRY_SERVER }},
+            IMAGE_REGISTRY_USERNAME=${{ secrets.IMAGE_REGISTRY_USERNAME }},
+            IMAGE_REGISTRY_PASSWORD=${{ secrets.IMAGE_REGISTRY_PASSWORD }},
+            STORAGE_ACCOUNT_NAME=${{ secrets.STORAGE_ACCOUNT_NAME }}
+          }"
+
+    - name: Wait for environment update to complete
+      run: |
+        echo "Waiting for Lambda environment update to complete..."
+        aws lambda wait function-updated \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }}
+        echo "Lambda environment update completed successfully"
+
+    - name: Get Lambda function info
+      run: |
+        echo "Lambda function deployment completed!"
+        aws lambda get-function \
+          --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
+          --query 'Configuration.[FunctionName,LastModified,State,ImageUri]' \
+          --output table
