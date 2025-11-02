@@ -24,7 +24,57 @@ Acido (**A**zure **C**ontainer **I**nstance **D**istributed **O**perations) enab
 
 **Simple**: Split targets automatically, deploy containers, collect results, cleanup - all automated.
 
-![acido](https://user-images.githubusercontent.com/15344287/170670823-1e3b0de3-2834-4d38-a21d-368c50f073d3.png)
+```
++---------------------------+
+| 1. Prepare targets file   |
+|    urls.txt               |
++------------+--------------+
+             |
+             v
++---------------------------+
+| 2. Configure (first time) |
+|    acido configure        |
++------------+--------------+
+             |
+             v
++-----------------------------+
+| 3. Create nuclei image      |
+|    `acido create nuclei     |
+|    --image projectdiscovery/|
+|          nuclei:latest`     |
++------------+----------------+
+             |
+             v
++----------------------------------------------+
+| 4. Run distributed scan fleet                |
+|    ` acido fleet nuclei-scan                 |
+|      -n 10                                   |
+|      -im nuclei                              |
+|      -t "nuclei -list input"                 |
+|      -i urls.txt                             |
+|      -o results                              |
+|      --rm-when-done (optional auto cleanup)` |
++------------+---------------------------------+
+             |
+             v
++---------------------------+
+| 5. View results           |
+|    Open 'results' file    |
++------------+--------------+
+             |
+             v
++------------------------+
+| 6. Cleanup acido fleet |-- Yes (auto --rm-when-done)
++------------------------+
+             |
+        No   v
++---------------------------+
+| Manual cleanup            |
+| `acido rm nuclei-scan`    |
++---------------------------+
+
+(If --rm-when-done was used, skip manual cleanup.)
+```
 
 Inspired by [axiom](https://github.com/pry0cc/axiom).
 
