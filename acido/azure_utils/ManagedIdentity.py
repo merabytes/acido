@@ -89,9 +89,19 @@ class ManagedAuthentication:
             return None
 
     def get_client_secret_credential(self):
-        tenant_id = input("Enter TENANT_ID: ")
-        client_id = input("Enter CLIENT_ID: ")
-        client_secret = getpass.getpass("Enter CLIENT_SECRET: ")
+        # Try to get credentials from environment variables first
+        tenant_id = _os.getenv("AZURE_TENANT_ID")
+        client_id = _os.getenv("AZURE_CLIENT_ID")
+        client_secret = _os.getenv("AZURE_CLIENT_SECRET")
+        
+        # Only ask for input if environment variables are not set
+        if not tenant_id:
+            tenant_id = input("Enter TENANT_ID: ")
+        if not client_id:
+            client_id = input("Enter CLIENT_ID: ")
+        if not client_secret:
+            client_secret = getpass.getpass("Enter CLIENT_SECRET: ")
+            
         return azure.identity.ClientSecretCredential(
             tenant_id=tenant_id,
             client_id=client_id,

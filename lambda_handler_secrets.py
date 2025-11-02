@@ -262,7 +262,7 @@ def lambda_handler(event, context):
             'body': json.dumps({
                 'status': 'healthy',
                 'message': 'Lambda function is running',
-                'version': '0.35'
+                'version': '0.36'
             })
         }
     
