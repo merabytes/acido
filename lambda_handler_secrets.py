@@ -174,7 +174,7 @@ def lambda_handler(event, context):
         "action": "create",
         "secret": "my-secret-value",
         "password": "optional-password-for-encryption",
-        "turnstile_token": "optional-cloudflare-turnstile-token"
+        "turnstile_token": "cloudflare-turnstile-token"
     }
     
     Expected event format for retrieving/deleting a secret:
@@ -182,7 +182,12 @@ def lambda_handler(event, context):
         "action": "retrieve",
         "uuid": "generated-uuid-here",
         "password": "password-if-encrypted",
-        "turnstile_token": "optional-cloudflare-turnstile-token"
+        "turnstile_token": "cloudflare-turnstile-token"
+    }
+    
+    Expected event format for healthcheck:
+    {
+        "action": "healthcheck"
     }
     
     Or with body wrapper (from API Gateway):
@@ -191,7 +196,7 @@ def lambda_handler(event, context):
             "action": "create",
             "secret": "my-secret-value",
             "password": "optional-password-for-encryption",
-            "turnstile_token": "optional-cloudflare-turnstile-token"
+            "turnstile_token": "cloudflare-turnstile-token"
         }
     }
     
@@ -200,9 +205,7 @@ def lambda_handler(event, context):
     - AZURE_TENANT_ID
     - AZURE_CLIENT_ID
     - AZURE_CLIENT_SECRET
-    
-    Environment variables optional:
-    - CF_SECRET_KEY: CloudFlare Turnstile secret key (enables bot protection)
+    - CF_SECRET_KEY: CloudFlare Turnstile secret key (bot protection is always enabled)
     
     Password-based encryption:
     - If "password" is provided during creation, the secret will be encrypted with AES-256
@@ -213,9 +216,25 @@ def lambda_handler(event, context):
         dict: Response with statusCode and body containing operation result
     """
     
-    # Parse event
+    # CORS headers for merabytes.com domains
+    cors_headers = {
+        "Access-Control-Allow-Origin": "https://www.merabytes.com",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Content-Type": "application/json"
+    }
+    
+    # Parse event first to handle string inputs
     if isinstance(event, str):
         event = json.loads(event)
+    
+    # Handle OPTIONS preflight request
+    if event.get("requestContext", {}).get("http", {}).get("method") == "OPTIONS":
+        return {
+            "statusCode": 200,
+            "headers": cors_headers,
+            "body": json.dumps({"message": "CORS preflight OK"})
+        }
     
     # Handle body wrapper (e.g., from API Gateway)
     if "body" in event:
@@ -227,6 +246,7 @@ def lambda_handler(event, context):
     if not event:
         return {
             'statusCode': 400,
+            'headers': cors_headers,
             'body': json.dumps({
                 'error': 'Missing event body. Expected fields: action, secret (for create) or uuid (for retrieve)'
             })
@@ -234,40 +254,54 @@ def lambda_handler(event, context):
     
     action = event.get('action')
     
-    if not action or action not in ['create', 'retrieve']:
+    # Handle healthcheck action (no turnstile validation required)
+    if action == 'healthcheck':
         return {
-            'statusCode': 400,
+            'statusCode': 200,
+            'headers': cors_headers,
             'body': json.dumps({
-                'error': 'Invalid or missing action. Must be either "create" or "retrieve"'
+                'status': 'healthy',
+                'message': 'Lambda function is running',
+                'version': '0.35'
             })
         }
     
-    # Validate CloudFlare Turnstile token if CF_SECRET_KEY is set
-    if os.environ.get('CF_SECRET_KEY'):
-        turnstile_token = event.get('turnstile_token')
-        
-        if not turnstile_token:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({
-                    'error': 'Missing required field: turnstile_token (bot protection enabled)'
-                })
-            }
-        
-        # Extract remote IP from context or event
-        remoteip = None
-        if context and hasattr(context, 'identity') and hasattr(context.identity, 'sourceIp'):
-            remoteip = context.identity.sourceIp
-        elif 'requestContext' in event and 'identity' in event['requestContext']:
-            remoteip = event['requestContext']['identity'].get('sourceIp')
-        
-        if not validate_turnstile(turnstile_token, remoteip):
-            return {
-                'statusCode': 403,
-                'body': json.dumps({
-                    'error': 'Invalid or expired Turnstile token'
-                })
-            }
+    if not action or action not in ['create', 'retrieve']:
+        return {
+            'statusCode': 400,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Invalid or missing action. Must be "create", "retrieve", or "healthcheck"'
+            })
+        }
+    
+    # Validate CloudFlare Turnstile token (now always required for create/retrieve)
+    turnstile_token = event.get('turnstile_token')
+    
+    if not turnstile_token:
+        return {
+            'statusCode': 400,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Missing required field: turnstile_token (bot protection enabled)'
+            })
+        }
+    
+    # Extract remote IP from context or event
+    remoteip = None
+    if context and hasattr(context, 'identity') and hasattr(context.identity, 'sourceIp'):
+        remoteip = context.identity.sourceIp
+    elif 'requestContext' in event and 'identity' in event['requestContext']:
+        remoteip = event['requestContext']['identity'].get('sourceIp')
+    
+    if not validate_turnstile(turnstile_token, remoteip):
+        return {
+            'statusCode': 403,
+            'headers': cors_headers,
+            'body': json.dumps({
+                'error': 'Invalid or expired Turnstile token'
+            })
+        }
     
     try:
         # Initialize VaultManager with Azure Key Vault
@@ -281,6 +315,7 @@ def lambda_handler(event, context):
             if not secret_value:
                 return {
                     'statusCode': 400,
+                    'headers': cors_headers,
                     'body': json.dumps({
                         'error': 'Missing required field: secret'
                     })
@@ -296,6 +331,7 @@ def lambda_handler(event, context):
                 except Exception as e:
                     return {
                         'statusCode': 500,
+                        'headers': cors_headers,
                         'body': json.dumps({
                             'error': f'Encryption failed: {str(e)}'
                         })
@@ -307,6 +343,7 @@ def lambda_handler(event, context):
             # Return success response with UUID
             return {
                 'statusCode': 201,
+                'headers': cors_headers,
                 'body': json.dumps({
                     'uuid': secret_uuid,
                     'message': 'Secret created successfully'
@@ -321,6 +358,7 @@ def lambda_handler(event, context):
             if not secret_uuid:
                 return {
                     'statusCode': 400,
+                    'headers': cors_headers,
                     'body': json.dumps({
                         'error': 'Missing required field: uuid'
                     })
@@ -330,6 +368,7 @@ def lambda_handler(event, context):
             if not vault_manager.secret_exists(secret_uuid):
                 return {
                     'statusCode': 404,
+                    'headers': cors_headers,
                     'body': json.dumps({
                         'error': 'Secret not found or already accessed'
                     })
@@ -347,6 +386,7 @@ def lambda_handler(event, context):
                     vault_manager.delete_secret(secret_uuid)
                     return {
                         'statusCode': 400,
+                        'headers': cors_headers,
                         'body': json.dumps({
                             'error': f'Decryption failed: {str(e)}'
                         })
@@ -358,6 +398,7 @@ def lambda_handler(event, context):
             # Return success response with secret value
             return {
                 'statusCode': 200,
+                'headers': cors_headers,
                 'body': json.dumps({
                     'secret': secret_value,
                     'message': 'Secret retrieved and deleted successfully'
@@ -374,5 +415,6 @@ def lambda_handler(event, context):
         
         return {
             'statusCode': 500,
+            'headers': cors_headers,
             'body': json.dumps(error_details)
         }
