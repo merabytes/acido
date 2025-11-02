@@ -33,6 +33,7 @@ This implementation follows the OneTimeSecret pattern where secrets self-destruc
 - **Secure Storage**: All secrets stored in Azure KeyVault
 - **Serverless**: Runs on AWS Lambda with automatic scaling
 - **Continuous Deployment**: Automated deployment via GitHub Actions
+- **Bot Protection**: Optional CloudFlare Turnstile integration for spam prevention
 
 ## API Reference
 
@@ -40,11 +41,20 @@ This implementation follows the OneTimeSecret pattern where secrets self-destruc
 
 Store a new secret and receive a UUID to access it.
 
-**Request:**
+**Request (without Turnstile):**
 ```json
 {
   "action": "create",
   "secret": "Your secret message here"
+}
+```
+
+**Request (with Turnstile enabled):**
+```json
+{
+  "action": "create",
+  "secret": "Your secret message here",
+  "turnstile_token": "cloudflare-turnstile-response-token"
 }
 ```
 
@@ -56,15 +66,38 @@ Store a new secret and receive a UUID to access it.
 }
 ```
 
+**Response (400 Bad Request - Turnstile enabled, token missing):**
+```json
+{
+  "error": "Missing required field: turnstile_token (bot protection enabled)"
+}
+```
+
+**Response (403 Forbidden - Invalid Turnstile token):**
+```json
+{
+  "error": "Invalid or expired Turnstile token"
+}
+```
+
 ### Retrieve Secret
 
 Retrieve and delete a secret using its UUID (one-time access).
 
-**Request:**
+**Request (without Turnstile):**
 ```json
 {
   "action": "retrieve",
   "uuid": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Request (with Turnstile enabled):**
+```json
+{
+  "action": "retrieve",
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "turnstile_token": "cloudflare-turnstile-response-token"
 }
 ```
 
@@ -105,6 +138,11 @@ Retrieve and delete a secret using its UUID (one-time access).
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
 
+4. **CloudFlare Turnstile** (Optional - for bot protection):
+   - Create a Turnstile site at https://dash.cloudflare.com/
+   - Get the Site Key (for frontend) and Secret Key (for backend)
+   - Add `CF_SECRET_KEY` to GitHub Secrets and Lambda environment variables
+
 ### Automated Deployment
 
 The service automatically deploys to AWS Lambda when changes are pushed to the `main` branch.
@@ -131,7 +169,7 @@ aws lambda update-function-code \
   --image-uri <ECR_REGISTRY>/acido-secrets:latest
 ```
 
-4. **Set environment variables:**
+4. **Set environment variables (without Turnstile):**
 ```bash
 aws lambda update-function-configuration \
   --function-name AcidoSecrets \
@@ -142,6 +180,66 @@ aws lambda update-function-configuration \
     AZURE_CLIENT_SECRET=<client-secret>
   }"
 ```
+
+5. **Set environment variables (with Turnstile):**
+```bash
+aws lambda update-function-configuration \
+  --function-name AcidoSecrets \
+  --environment "Variables={
+    KEY_VAULT_NAME=<your-vault-name>,
+    AZURE_TENANT_ID=<tenant-id>,
+    AZURE_CLIENT_ID=<client-id>,
+    AZURE_CLIENT_SECRET=<client-secret>,
+    CF_SECRET_KEY=<cloudflare-turnstile-secret-key>
+  }"
+```
+
+## CloudFlare Turnstile Integration
+
+CloudFlare Turnstile provides bot protection to prevent abuse of the secrets service. It's **optional** and only activated when the `CF_SECRET_KEY` environment variable is set.
+
+### Setup
+
+1. **Create a Turnstile Site:**
+   - Go to https://dash.cloudflare.com/
+   - Navigate to Turnstile
+   - Create a new site
+   - Choose "Managed" or "Non-Interactive" mode
+   - Copy the Site Key and Secret Key
+
+2. **Configure Lambda:**
+   - Add `CF_SECRET_KEY` to your Lambda environment variables
+   - Deploy the updated configuration
+
+3. **Frontend Integration:**
+   ```html
+   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+   
+   <div class="cf-turnstile" data-sitekey="YOUR_SITE_KEY"></div>
+   ```
+
+4. **Send Token with Request:**
+   ```javascript
+   const turnstileToken = document.querySelector('[name="cf-turnstile-response"]').value;
+   
+   fetch(lambdaUrl, {
+     method: 'POST',
+     headers: { 'Content-Type': 'application/json' },
+     body: JSON.stringify({
+       action: 'create',
+       secret: 'my-secret',
+       turnstile_token: turnstileToken
+     })
+   });
+   ```
+
+### How It Works
+
+- **When CF_SECRET_KEY is NOT set**: Turnstile validation is skipped entirely
+- **When CF_SECRET_KEY is set**: All requests must include a valid `turnstile_token`
+- Invalid or missing tokens return 403 Forbidden
+- The service validates tokens with CloudFlare's API
+- Remote IP is extracted from Lambda context when available
 
 ## Testing
 

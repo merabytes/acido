@@ -375,6 +375,7 @@ Acido includes a OneTimeSecret-like service for secure secrets sharing via AWS L
 - One-time access (auto-delete after retrieval)
 - Secure storage in Azure KeyVault
 - Serverless AWS Lambda deployment
+- Optional CloudFlare Turnstile bot protection
 
 **Quick Example:**
 

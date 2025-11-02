@@ -6,13 +6,44 @@ This module provides a OneTimeSecret-like service where secrets can be:
 - Retrieved and deleted (one-time access)
 
 The service uses Azure KeyVault for secure secret storage.
+Optional CloudFlare Turnstile support for bot protection.
 """
 
 import json
 import os
 import traceback
 import uuid
+import requests
 from acido.azure_utils.VaultManager import VaultManager
+
+
+def validate_turnstile(token, remoteip=None) -> bool:
+    """
+    Validate CloudFlare Turnstile token.
+    
+    Args:
+        token: The Turnstile response token from the client
+        remoteip: Optional remote IP address of the client
+        
+    Returns:
+        bool: True if validation succeeds, False otherwise
+    """
+    secret = os.environ.get('CF_SECRET_KEY')
+    if not secret:
+        # If CF_SECRET_KEY is not set, skip validation
+        return True
+    
+    data = {'secret': secret, 'response': token}
+    if remoteip:
+        data['remoteip'] = remoteip
+    
+    try:
+        response = requests.post("https://challenges.cloudflare.com/turnstile/v0/siteverify", data=data)
+        result = response.json()
+        return result.get("success", False)
+    except Exception:
+        # If validation fails due to network or other issues, reject
+        return False
 
 
 def lambda_handler(event, context):
@@ -22,20 +53,23 @@ def lambda_handler(event, context):
     Expected event format for creating a secret:
     {
         "action": "create",
-        "secret": "my-secret-value"
+        "secret": "my-secret-value",
+        "turnstile_token": "optional-cloudflare-turnstile-token"
     }
     
     Expected event format for retrieving/deleting a secret:
     {
         "action": "retrieve",
-        "uuid": "generated-uuid-here"
+        "uuid": "generated-uuid-here",
+        "turnstile_token": "optional-cloudflare-turnstile-token"
     }
     
     Or with body wrapper (from API Gateway):
     {
         "body": {
             "action": "create",
-            "secret": "my-secret-value"
+            "secret": "my-secret-value",
+            "turnstile_token": "optional-cloudflare-turnstile-token"
         }
     }
     
@@ -44,6 +78,9 @@ def lambda_handler(event, context):
     - AZURE_TENANT_ID
     - AZURE_CLIENT_ID
     - AZURE_CLIENT_SECRET
+    
+    Environment variables optional:
+    - CF_SECRET_KEY: CloudFlare Turnstile secret key (enables bot protection)
     
     Returns:
         dict: Response with statusCode and body containing operation result
@@ -77,6 +114,33 @@ def lambda_handler(event, context):
                 'error': 'Invalid or missing action. Must be either "create" or "retrieve"'
             })
         }
+    
+    # Validate CloudFlare Turnstile token if CF_SECRET_KEY is set
+    if os.environ.get('CF_SECRET_KEY'):
+        turnstile_token = event.get('turnstile_token')
+        
+        if not turnstile_token:
+            return {
+                'statusCode': 400,
+                'body': json.dumps({
+                    'error': 'Missing required field: turnstile_token (bot protection enabled)'
+                })
+            }
+        
+        # Extract remote IP from context or event
+        remoteip = None
+        if context and hasattr(context, 'identity') and hasattr(context.identity, 'sourceIp'):
+            remoteip = context.identity.sourceIp
+        elif 'requestContext' in event and 'identity' in event['requestContext']:
+            remoteip = event['requestContext']['identity'].get('sourceIp')
+        
+        if not validate_turnstile(turnstile_token, remoteip):
+            return {
+                'statusCode': 403,
+                'body': json.dumps({
+                    'error': 'Invalid or expired Turnstile token'
+                })
+            }
     
     try:
         # Initialize VaultManager with Azure Key Vault
