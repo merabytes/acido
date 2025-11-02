@@ -8,6 +8,8 @@ invoked via AWS Lambda with JSON payloads containing scan configurations.
 import json
 import os
 import sys
+import tempfile
+import traceback
 from acido.cli import Acido
 from multiprocessing.pool import ThreadPool
 
@@ -95,7 +97,6 @@ def lambda_handler(event, context):
     
     try:
         # Create temporary input file with targets
-        import tempfile
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
             input_file = f.name
             f.write('\n'.join(targets))
@@ -131,7 +132,8 @@ def lambda_handler(event, context):
         # Clean up temporary input file
         try:
             os.unlink(input_file)
-        except:
+        except (OSError, FileNotFoundError) as e:
+            # Log but don't fail if cleanup fails
             pass
         
         # Clean up containers if requested
@@ -151,7 +153,6 @@ def lambda_handler(event, context):
         
     except Exception as e:
         # Return error response
-        import traceback
         error_details = {
             'error': str(e),
             'type': type(e).__name__,

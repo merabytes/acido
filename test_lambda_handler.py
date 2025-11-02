@@ -10,17 +10,15 @@ from unittest.mock import Mock, patch, MagicMock
 import sys
 import os
 
-# Add parent directory to path to import lambda_handler
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 # Mock sys.argv to prevent argparse from processing test args
-original_argv = sys.argv
+_original_argv = sys.argv
 sys.argv = ['test']
 
-from lambda_handler import lambda_handler
-
-# Restore original argv
-sys.argv = original_argv
+try:
+    from lambda_handler import lambda_handler
+finally:
+    # Restore original argv
+    sys.argv = _original_argv
 
 
 class TestLambdaHandler(unittest.TestCase):
