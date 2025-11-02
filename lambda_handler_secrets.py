@@ -15,8 +15,9 @@ import traceback
 import uuid
 import requests
 import base64
-import hashlib
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 from acido.azure_utils.VaultManager import VaultManager
 
@@ -30,10 +31,20 @@ def encrypt_secret(secret_value: str, password: str) -> str:
         password: The password to use for encryption
         
     Returns:
-        str: Base64-encoded encrypted secret with IV prepended
+        str: Base64-encoded encrypted secret with salt and IV prepended
     """
-    # Derive a 256-bit key from the password using SHA-256
-    key = hashlib.sha256(password.encode()).digest()
+    # Generate a random salt for PBKDF2
+    salt = os.urandom(16)
+    
+    # Derive a 256-bit key from the password using PBKDF2
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    key = kdf.derive(password.encode())
     
     # Generate a random 128-bit IV
     iv = os.urandom(16)
@@ -50,8 +61,8 @@ def encrypt_secret(secret_value: str, password: str) -> str:
     # Encrypt the padded secret
     encrypted = encryptor.update(padded_secret) + encryptor.finalize()
     
-    # Prepend IV to encrypted data and encode as base64
-    return base64.b64encode(iv + encrypted).decode()
+    # Prepend salt and IV to encrypted data and encode as base64
+    return base64.b64encode(salt + iv + encrypted).decode()
 
 
 def decrypt_secret(encrypted_value: str, password: str) -> str:
@@ -59,7 +70,7 @@ def decrypt_secret(encrypted_value: str, password: str) -> str:
     Decrypt a secret using AES-256 with a password.
     
     Args:
-        encrypted_value: Base64-encoded encrypted secret with IV prepended
+        encrypted_value: Base64-encoded encrypted secret with salt and IV prepended
         password: The password to use for decryption
         
     Returns:
@@ -69,19 +80,27 @@ def decrypt_secret(encrypted_value: str, password: str) -> str:
         ValueError: If decryption fails (wrong password or corrupted data)
     """
     try:
-        # Derive the same 256-bit key from the password
-        key = hashlib.sha256(password.encode()).digest()
-        
         # Decode from base64
         encrypted_data = base64.b64decode(encrypted_value.encode())
         
-        # Validate minimum length (IV + at least one block)
-        if len(encrypted_data) < 32:  # 16 bytes IV + 16 bytes minimum ciphertext
+        # Validate minimum length (salt + IV + at least one block)
+        if len(encrypted_data) < 48:  # 16 bytes salt + 16 bytes IV + 16 bytes minimum ciphertext
             raise ValueError("Invalid encrypted data - too short")
         
-        # Extract IV (first 16 bytes) and ciphertext
-        iv = encrypted_data[:16]
-        ciphertext = encrypted_data[16:]
+        # Extract salt (first 16 bytes), IV (next 16 bytes), and ciphertext
+        salt = encrypted_data[:16]
+        iv = encrypted_data[16:32]
+        ciphertext = encrypted_data[32:]
+        
+        # Derive the same 256-bit key from the password using PBKDF2
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+            backend=default_backend()
+        )
+        key = kdf.derive(password.encode())
         
         # Create cipher and decrypt
         cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
