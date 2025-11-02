@@ -67,7 +67,7 @@ def wait_command(rg, cg, cont, wait=None, instance_manager=None):
                             break
                 
                 last_state_check = time_spent
-            except (HttpResponseError, AttributeError) as e:
+            except (HttpResponseError, AttributeError):
                 # Don't fail the entire wait if state check fails, just continue
                 # HttpResponseError: API call failures (e.g., network issues)
                 # AttributeError: Missing attributes on container_group object
