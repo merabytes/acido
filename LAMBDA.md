@@ -33,6 +33,7 @@ The Lambda function allows you to invoke acido's distributed scanning capabiliti
    - `IMAGE_REGISTRY_USERNAME`
    - `IMAGE_REGISTRY_PASSWORD`
    - `STORAGE_ACCOUNT_NAME`
+   - `LAMBDA_FUNCTION_URL` (optional, for testing after deployment)
 
 ### Automatic Deployment
 
@@ -43,6 +44,7 @@ The workflow:
 2. Tags and pushes to Amazon ECR
 3. Updates the Lambda function with the new image
 4. Updates environment variables from secrets
+5. Tests the Lambda Function URL (if `LAMBDA_FUNCTION_URL` secret is set)
 
 ### Manual Deployment
 
@@ -129,6 +131,8 @@ Error response (400/500):
 
 ### Testing the Lambda Function
 
+#### Using AWS CLI
+
 You can test the Lambda function using the AWS CLI:
 
 ```bash
@@ -140,7 +144,21 @@ aws lambda invoke \
 cat response.json
 ```
 
-Or using the AWS Console:
+#### Using Lambda Function URL
+
+If you've configured a Lambda Function URL:
+
+```bash
+curl -X POST "https://your-function-url.lambda-url.eu-west-1.on.aws/" \
+  -H "Content-Type: application/json" \
+  -H "User-Agent: Merabytes-Portal" \
+  -d @example_lambda_payload.json
+```
+
+The deployment workflow automatically tests the Function URL after each deployment if the `LAMBDA_FUNCTION_URL` secret is configured.
+
+#### Using AWS Console
+
 1. Go to Lambda → Functions → Acido
 2. Click "Test"
 3. Create a new test event with the example payload

@@ -94,3 +94,55 @@ jobs:
           --function-name ${{ env.LAMBDA_FUNCTION_NAME }} \
           --query 'Configuration.[FunctionName,LastModified,State,ImageUri]' \
           --output table
+
+    - name: Test Lambda Function URL
+      if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      env:
+        LAMBDA_FUNCTION_URL: ${{ secrets.LAMBDA_FUNCTION_URL }}
+      run: |
+        if [ -n "$LAMBDA_FUNCTION_URL" ]; then
+          echo "=========================================="
+          echo "Testing deployed Lambda Function URL"
+          echo "=========================================="
+          
+          response=$(curl -i -X POST "$LAMBDA_FUNCTION_URL" \
+            -H "Content-Type: application/json" \
+            -H 'User-Agent: Merabytes-Portal' \
+            -d @example_lambda_payload.json \
+            --max-time 900 \
+            --silent \
+            --write-out "\n%{http_code}")
+          
+          # Extract HTTP status code (last line)
+          http_code=$(echo "$response" | tail -n1)
+          
+          # Extract response body (everything except last line)
+          response_body=$(echo "$response" | sed '$d')
+          
+          echo ""
+          echo "HTTP Status Code: $http_code"
+          echo ""
+          echo "Response:"
+          echo "$response_body"
+          echo ""
+          
+          # Check if status code is 200
+          if [ "$http_code" -eq 200 ]; then
+            echo "✓ Lambda function test PASSED"
+            echo "Successfully invoked Lambda with example payload"
+            
+            # Try to parse and display key information from response
+            if command -v jq &> /dev/null; then
+              echo ""
+              echo "Response details:"
+              echo "$response_body" | jq -r 'try (.body | fromjson | "Fleet: \(.fleet_name), Instances: \(.instances), Image: \(.image)") catch "Could not parse response body"'
+            fi
+          else
+            echo "✗ Lambda function test FAILED"
+            echo "Expected HTTP 200, got $http_code"
+            exit 1
+          fi
+        else
+          echo "⚠ LAMBDA_FUNCTION_URL secret not set, skipping test"
+          echo "To enable testing, add LAMBDA_FUNCTION_URL to repository secrets"
+        fi
