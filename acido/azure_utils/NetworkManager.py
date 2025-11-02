@@ -1,12 +1,12 @@
 from azure.mgmt.network import NetworkManagementClient
 from azure.mgmt.network.models import Delegation, VirtualNetwork, Subnet, NetworkProfile, PublicIPAddressSku, NatGatewaySku, SubResource, NatGateway
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication
+from acido.azure_utils.ManagedIdentity import ManagedIdentity
 from huepy import good, bad, info, bold, green, red, orange
 
 __authors__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
 
-class NetworkManager(ManagedAuthentication):
+class NetworkManager(ManagedIdentity):
     def __init__(self, resource_group, login: bool = True, user_assigned: str = None, ip_address: str = None):
         self.resource_group = resource_group
         self.location = 'westeurope'

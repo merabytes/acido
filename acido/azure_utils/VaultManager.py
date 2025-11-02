@@ -1,4 +1,4 @@
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication
+from acido.azure_utils.ManagedIdentity import ManagedIdentity
 from azure.keyvault.secrets import SecretClient
 from azure.core.exceptions import ResourceNotFoundError
 import os
@@ -6,13 +6,18 @@ import os
 __authors__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
 
-class VaultManager(ManagedAuthentication):
+class VaultManager(ManagedIdentity):
     # TODO: This should be a singleton
     def __init__(self, vault_name=None):
         if not vault_name:
             vault_name = os.getenv("KEY_VAULT_NAME")
+        if not vault_name:
+            raise RuntimeError("KEY_VAULT_NAME is required (env var or ctor arg).")
         self.vault_name = vault_name
-        self.credential = self.get_credential()
+
+        # Prefer MI if MANAGED_IDENTITY_CLIENT_ID is set; otherwise SP.
+        # Validate specifically for Key Vault.
+        self.credential = self.get_credential(scope_keys=("vault",))
         self.client = self.get_client(self.credential)
 
     def get_client(self, credential):
@@ -23,50 +28,25 @@ class VaultManager(ManagedAuthentication):
 
     def check_access(self, client):
         try:
-            name = client.list_properties_of_secrets().next().name
-            client.get_secret(name).value
+            pager = client.list_properties_of_secrets()
+            first = next(iter(pager), None)
+            if not first:
+                return True
+            client.get_secret(first.name).value
+            return True
         except Exception:
             return False
-        return True
 
     def get_secret(self, secret_name):
         return self.client.get_secret(secret_name).value
 
     def set_secret(self, secret_name, secret_value):
-        """
-        Create or update a secret in the Key Vault.
-        
-        Args:
-            secret_name: The name/key for the secret
-            secret_value: The value to store
-            
-        Returns:
-            KeyVaultSecret: The created/updated secret
-        """
         return self.client.set_secret(secret_name, secret_value)
 
     def delete_secret(self, secret_name):
-        """
-        Delete a secret from the Key Vault.
-        
-        Args:
-            secret_name: The name/key of the secret to delete
-            
-        Returns:
-            DeletedSecret: Information about the deleted secret
-        """
         return self.client.begin_delete_secret(secret_name).result()
 
     def secret_exists(self, secret_name):
-        """
-        Check if a secret exists in the Key Vault.
-        
-        Args:
-            secret_name: The name/key of the secret to check
-            
-        Returns:
-            bool: True if the secret exists, False otherwise
-        """
         try:
             self.client.get_secret(secret_name)
             return True

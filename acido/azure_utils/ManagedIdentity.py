@@ -11,97 +11,92 @@ import jwt as _jwt
 import getpass
 from huepy import bad
 import sys
-import traceback
 import logging
+from typing import Iterable, Tuple
 
-# Suppress Azure CLI credential warnings when using alternative credentials
 logging.getLogger('azure.identity').setLevel(logging.ERROR)
 
 __author__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
 
 def _as_scope(url: str) -> str:
-    # turn "https://storage.azure.com/" into "https://storage.azure.com/.default"
     return url.rstrip("/") + "/.default"
 
-class ManagedAuthentication:
+
+class ManagedIdentity:
+    """
+    get_credential() prefers Managed Identity if MANAGED_IDENTITY_CLIENT_ID is present;
+    otherwise uses ClientSecretCredential. In both cases, validates by acquiring a token
+    for ANY of the requested scopes (vault/blob/instance).
+    """
 
     @property
     def client_id(self) -> str:
         return _os.getenv("MANAGED_IDENTITY_CLIENT_ID")
 
-    def get_credential(self):
-        drivers = {
-            "cloud": [
-                self.get_environment_credential,
-                self.get_managed_credential,
-                self.get_cli_credential
-            ],
-            "local": [
-                self.get_environment_credential,
-                self.get_cli_credential,
-                self.get_client_secret_credential
-            ]
-        }
+    def get_credential(self, scope_keys: Iterable[str] = ("vault", "blob", "instance")):
+        """
+        Returns a credential validated against at least one of the provided scopes.
+        Priority:
+          1) Managed Identity if MANAGED_IDENTITY_CLIENT_ID is set
+          2) ClientSecretCredential (env-first, prompt-if-missing)
+        """
+        # 1) Prefer Managed Identity when client id is configured
+        if self.client_id:
+            mi = self._get_managed_identity_credential()
+            if self._ensure_any_scope(mi, scope_keys):
+                return mi
+            # fall through to SP only if MI cannot get any requested scope
 
-        driver_list = "cloud" if self.is_cloud() else "local"
+        # 2) Client Secret (env-first; prompt for missing)
+        sp = self.get_client_secret_credential()
+        if self._ensure_any_scope(sp, scope_keys):
+            return sp
 
-        def credential_works(cred) -> bool:
+        scopes = ", ".join(f"{k}={Resources._msi.get(k, '?')}" for k in scope_keys)
+        raise RuntimeError(
+            "Unable to acquire an access token for any of the requested scopes. "
+            f"Scopes tried: {scopes}. Verify credentials and permissions."
+        )
+
+    # ---- Helpers ------------------------------------------------------------
+    def _ensure_any_scope(self, cred, scope_keys: Iterable[str]) -> bool:
+        for key in scope_keys:
+            url = Resources._msi.get(key)
+            if not url:
+                continue
             try:
-                # ARM scope is a lightweight sanity check
-                cred.get_token(_as_scope(Resources._msi["instance"]))
+                cred.get_token(_as_scope(url))
                 return True
             except Exception:
-                return False
-
-        # If a check_access hook exists, use it to validate the client as well.
-        for driver in drivers[driver_list]:
-            cred = driver()
-            if not cred:
                 continue
-            if hasattr(self, "check_access"):
-                try:
-                    client = self.get_client(cred)
-                    if self.check_access(client):
-                        return cred
-                except Exception:
-                    continue
-            else:
-                if credential_works(cred):
-                    return cred
+        return False
 
-        print("No permissions granted for the available credentials.")
-        return None
-
+    # Individual builders kept for completeness / reuse
     def get_managed_credential(self):
         return self._get_managed_identity_credential()
 
     def _get_managed_identity_credential(self):
-        return azure.identity.ManagedIdentityCredential(
-            client_id=self.client_id
-        )
+        return azure.identity.ManagedIdentityCredential(client_id=self.client_id)
 
     def get_cli_credential(self):
         try:
             return AzureCliCredential()
         except Exception:
-            # Silently return None to allow fallback to other credential methods
             return None
 
     def get_client_secret_credential(self):
-        # Try to get credentials from environment variables first
         tenant_id = _os.getenv("AZURE_TENANT_ID")
         client_id = _os.getenv("AZURE_CLIENT_ID")
         client_secret = _os.getenv("AZURE_CLIENT_SECRET")
-        
-        # Only ask for input if environment variables are not set
+
         if not tenant_id:
-            tenant_id = input("Enter TENANT_ID: ")
+            tenant_id = input("Enter AZURE_TENANT_ID: ")
         if not client_id:
-            client_id = input("Enter CLIENT_ID: ")
+            client_id = input("Enter AZURE_CLIENT_ID: ")
         if not client_secret:
-            client_secret = getpass.getpass("Enter CLIENT_SECRET: ")
-            
+            client_secret = getpass.getpass("Enter AZURE_CLIENT_SECRET: ")
+
         return azure.identity.ClientSecretCredential(
             tenant_id=tenant_id,
             client_id=client_id,
@@ -122,8 +117,8 @@ class ManagedAuthentication:
         auto = "MSI_ENDPOINT" in _os.environ or "MSI_SECRET" in _os.environ
         return force or auto
 
+    # --- Subscription extraction with Vault fallback (unchanged logic) -------
     def extract_subscription(self, credential):
-        # 1) Azure CLI: list subscriptions directly
         if isinstance(credential, (AzureCliCredential, azure.identity._credentials.azure_cli.AzureCliCredential)):
             try:
                 subs = SubscriptionClient(credential).subscriptions.list()
@@ -133,7 +128,6 @@ class ManagedAuthentication:
                 print(bad("No subscriptions found for the current Azure CLI context."))
                 sys.exit(1)
 
-        # Helper: try ARM list using whatever credential we have
         def try_arm_list():
             try:
                 subs = SubscriptionClient(credential).subscriptions.list()
@@ -142,48 +136,36 @@ class ManagedAuthentication:
             except Exception:
                 return None
 
-        # 2) Managed Identity: first try ARM list; if not allowed, decode xms_mirid
-        if isinstance(credential, ManagedIdentityCredential):
-            sub_id = try_arm_list()
-            if sub_id:
-                return sub_id
-            # Fallback: get a token (blob scope is fine—now correctly formed) and read xms_mirid
-            token = credential.get_token(_as_scope(Resources._msi["blob"])).token
-            obj = _jwt.decode(token, options={"verify_signature": False})
-            mirid = obj.get("xms_mirid")
-            if mirid:
-                return mirid.split("/")[2]
-            # As a second fallback, try ARM scope for the same trick
-            token = credential.get_token(_as_scope(Resources._msi["instance"])).token
-            obj = _jwt.decode(token, options={"verify_signature": False})
-            mirid = obj.get("xms_mirid")
-            if mirid:
-                return mirid.split("/")[2]
-            print(bad("Could not determine subscription id from Managed Identity token."))
-            sys.exit(1)
-
-        # 3) Environment / ClientSecret / other credentials:
-        # Prefer ARM list; if not permitted, try decoding xms_mirid from an ARM-scoped token.
-        if isinstance(credential, (EnvironmentCredential, ClientSecretCredential)) or credential:
-            sub_id = try_arm_list()
-            if sub_id:
-                return sub_id
+        def sub_from_scope(scope_key: str):
             try:
-                token = credential.get_token(_as_scope(Resources._msi["instance"])).token
+                token = credential.get_token(_as_scope(Resources._msi[scope_key])).token
                 obj = _jwt.decode(token, options={"verify_signature": False})
                 mirid = obj.get("xms_mirid")
                 if mirid:
                     return mirid.split("/")[2]
             except Exception:
                 pass
-            print(bad("Unable to resolve subscription id. Ensure the credential has ARM access or run az login."))
-            sys.exit(1)
-        
-        import code
-        code.interact(local=locals())
+            return None
 
-        # 4) No credential available
-        print(bad("Please run az login or provide valid credentials."))
+        if isinstance(credential, ManagedIdentityCredential):
+            sub_id = try_arm_list()
+            if sub_id:
+                return sub_id
+            for scope in ("vault", "blob", "instance"):
+                sub_id = sub_from_scope(scope)
+                if sub_id:
+                    return sub_id
+            print(bad("Could not determine subscription id from Managed Identity token."))
+            sys.exit(1)
+
+        sub_id = try_arm_list()
+        if sub_id:
+            return sub_id
+        for scope in ("instance", "vault", "blob"):
+            sub_id = sub_from_scope(scope)
+            if sub_id:
+                return sub_id
+        print(bad("Unable to resolve subscription id. Ensure the credential has ARM access or run az login."))
         sys.exit(1)
 
 
@@ -191,7 +173,8 @@ class Resources:
     _managed_identity = ["vault"]
     _msi = {
         "instance": "https://management.azure.com/",
-        "blob": "https://storage.azure.com/"
+        "blob": "https://storage.azure.com/",
+        "vault": "https://vault.azure.net/",
     }
 
     INSTANCE = "instance"

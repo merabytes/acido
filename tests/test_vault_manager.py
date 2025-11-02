@@ -32,7 +32,7 @@ class TestVaultManagerExtensions(unittest.TestCase):
         os.environ['AZURE_CLIENT_SECRET'] = 'test-secret'
 
     @patch('acido.azure_utils.VaultManager.SecretClient')
-    @patch('acido.azure_utils.VaultManager.ManagedAuthentication.get_credential')
+    @patch('acido.azure_utils.VaultManager.ManagedIdentity.get_credential')
     def test_set_secret(self, mock_get_credential, mock_secret_client_class):
         """Test setting a secret in Key Vault."""
         # Setup mocks
@@ -55,7 +55,7 @@ class TestVaultManagerExtensions(unittest.TestCase):
         self.assertEqual(result.value, 'test-value')
 
     @patch('acido.azure_utils.VaultManager.SecretClient')
-    @patch('acido.azure_utils.VaultManager.ManagedAuthentication.get_credential')
+    @patch('acido.azure_utils.VaultManager.ManagedIdentity.get_credential')
     def test_delete_secret(self, mock_get_credential, mock_secret_client_class):
         """Test deleting a secret from Key Vault."""
         # Setup mocks
@@ -79,7 +79,7 @@ class TestVaultManagerExtensions(unittest.TestCase):
         mock_poller.result.assert_called_once()
 
     @patch('acido.azure_utils.VaultManager.SecretClient')
-    @patch('acido.azure_utils.VaultManager.ManagedAuthentication.get_credential')
+    @patch('acido.azure_utils.VaultManager.ManagedIdentity.get_credential')
     def test_secret_exists_true(self, mock_get_credential, mock_secret_client_class):
         """Test checking if a secret exists (exists case)."""
         # Setup mocks
@@ -102,7 +102,7 @@ class TestVaultManagerExtensions(unittest.TestCase):
         mock_client.get_secret.assert_called_once_with('test-key')
 
     @patch('acido.azure_utils.VaultManager.SecretClient')
-    @patch('acido.azure_utils.VaultManager.ManagedAuthentication.get_credential')
+    @patch('acido.azure_utils.VaultManager.ManagedIdentity.get_credential')
     def test_secret_exists_false(self, mock_get_credential, mock_secret_client_class):
         """Test checking if a secret exists (does not exist case)."""
         # Setup mocks
@@ -123,7 +123,7 @@ class TestVaultManagerExtensions(unittest.TestCase):
         mock_client.get_secret.assert_called_once_with('test-key')
 
     @patch('acido.azure_utils.VaultManager.SecretClient')
-    @patch('acido.azure_utils.VaultManager.ManagedAuthentication.get_credential')
+    @patch('acido.azure_utils.VaultManager.ManagedIdentity.get_credential')
     def test_get_secret_existing(self, mock_get_credential, mock_secret_client_class):
         """Test getting an existing secret (original method still works)."""
         # Setup mocks

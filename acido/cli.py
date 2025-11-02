@@ -7,7 +7,7 @@ import tempfile
 from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
-from acido.azure_utils.ManagedIdentity import ManagedAuthentication
+from acido.azure_utils.ManagedIdentity import ManagedIdentity
 from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import InstanceManager
 from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
@@ -762,7 +762,7 @@ class Acido(object):
         storage_account = os.getenv('STORAGE_ACCOUNT_NAME') if os.getenv('STORAGE_ACCOUNT_NAME', None) else input(info('Storage Account Name to Use: '))
         
         if not os.getenv('STORAGE_ACCOUNT_NAME', None):
-            auth = ManagedAuthentication()
+            auth = ManagedIdentity()
             credential = auth.get_credential()
             subscription = auth.extract_subscription(credential)
             client = StorageManagementClient(
