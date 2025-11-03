@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and extract GitHub Actions Runner
+# Note: Check https://github.com/actions/runner/releases for the latest version
 ARG RUNNER_VERSION="2.311.0"
 WORKDIR /actions-runner
 RUN curl -o actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz -L \

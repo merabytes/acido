@@ -17,6 +17,9 @@ from acido.utils.lambda_utils import (
     validate_required_fields
 )
 
+# Valid operation types
+VALID_OPERATIONS = ['fleet', 'run']
+
 def _validate_targets(targets):
     """Validate targets parameter."""
     return targets and isinstance(targets, list)
@@ -134,9 +137,9 @@ def lambda_handler(event, context):
     # Determine operation type (default to 'fleet' for backward compatibility)
     operation = event.get('operation', 'fleet')
     
-    if operation not in ['fleet', 'run']:
+    if operation not in VALID_OPERATIONS:
         return build_error_response(
-            f'Invalid operation: {operation}. Must be "fleet" or "run"'
+            f'Invalid operation: {operation}. Must be one of: {", ".join(VALID_OPERATIONS)}'
         )
     
     # Validate required fields based on operation type before initializing Acido

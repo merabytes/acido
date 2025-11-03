@@ -673,8 +673,11 @@ class Acido(object):
         """
         # Validate duration (max 15 minutes for Lambda compatibility)
         if duration > 900:
-            print(bad(f'Duration {duration}s exceeds maximum of 900s (15 minutes). Setting to 900s.'))
             duration = 900
+            print(bad(f'Duration exceeds maximum of 900s (15 minutes). Using maximum duration.'))
+        elif duration < 1:
+            duration = 900
+            print(bad(f'Invalid duration. Using default of 900s (15 minutes).'))
         
         def print_if_not_quiet(msg):
             if not quiet:
