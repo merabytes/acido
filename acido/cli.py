@@ -1290,8 +1290,13 @@ class Acido(object):
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers
 {pkg_install}
-# Upgrade pip and install acido (psutil will build from source)
-RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_flags}acido
+# Create virtual environment and install acido (psutil will build from source)
+RUN python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH so acido CLI is available
+ENV PATH="/opt/acido-venv/bin:$PATH"
 
 {entrypoint_line}
 {cmd_line}
@@ -1315,8 +1320,13 @@ RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_
 # Install Python and build dependencies required for psutil and other native extensions
 RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all
 {pkg_install}
-# Upgrade pip and install acido (psutil will build from source)
-RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_flags}acido
+# Create virtual environment and install acido (psutil will build from source)
+RUN python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH so acido CLI is available
+ENV PATH="/opt/acido-venv/bin:$PATH"
 
 {entrypoint_line}
 {cmd_line}
@@ -1335,8 +1345,13 @@ RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 {pkg_install}
-# Upgrade pip and install acido (psutil will build from source)
-RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_flags}acido
+# Create virtual environment and install acido (psutil will build from source)
+RUN python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH so acido CLI is available
+ENV PATH="/opt/acido-venv/bin:$PATH"
 
 {entrypoint_line}
 {cmd_line}

@@ -163,8 +163,8 @@ jobs:
       run: |
         # This will test that acido can create a nuclei image using the correct Docker image
         # It will use environment variables for configuration
-        # Using --break-system-packages to handle externally managed Python environments
-        acido create nuclei --image projectdiscovery/nuclei:latest --break-system-packages || echo "Note: Image creation may fail without proper credentials, but command should execute"
+        # Now uses virtual environment to avoid PEP 668 issues
+        acido create nuclei --image projectdiscovery/nuclei:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
 
     - name: Test acido create nuclei with root flag
       env:
@@ -182,8 +182,8 @@ jobs:
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       run: |
         # Test acido create with --root flag for images that run as non-root by default
-        # Using --break-system-packages to handle externally managed Python environments
-        acido create nuclei --image projectdiscovery/nuclei:latest --root --break-system-packages || echo "Note: Image creation may fail without proper credentials, but command should execute"
+        # Now uses virtual environment to avoid PEP 668 issues
+        acido create nuclei --image projectdiscovery/nuclei:latest --root || echo "Note: Image creation may fail without proper credentials, but command should execute"
 
     - name: Test acido create from GitHub repository
       env:

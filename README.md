@@ -249,12 +249,12 @@ Options:
   --install PACKAGE           Install additional package (can be used multiple times)
   --no-update                 Skip package list update before installing packages
   --root                      Run as root user (for images that default to non-root)
-  --break-system-packages     Use --break-system-packages for pip (for externally managed Python)
+  --break-system-packages     [Deprecated] Use virtual environment instead (kept for compatibility)
   --entrypoint ENTRYPOINT     Override default ENTRYPOINT (e.g., "/bin/bash")
   --cmd CMD                   Override default CMD (e.g., "sleep infinity")
 
 Examples:
-  # Create from base image
+  # Create from base image (automatically uses virtual environment)
   acido create nmap --image nmap:latest
   
   # Create with root privileges (for non-root images like alpine/nikto)
@@ -263,8 +263,8 @@ Examples:
   # Install additional packages
   acido create custom --image alpine:latest --root --install python3 --install nmap
   
-  # Use --break-system-packages for externally managed Python environments
-  acido create nuclei --image projectdiscovery/nuclei:latest --break-system-packages
+  # Create nuclei image (uses virtual environment to avoid PEP 668 issues)
+  acido create nuclei --image projectdiscovery/nuclei:latest
   
   # Custom entrypoint and command
   acido create ubuntu --image ubuntu:20.04 --entrypoint "/bin/bash" --cmd "echo hello"
