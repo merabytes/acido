@@ -41,6 +41,9 @@ create_parser.add_argument('--image', dest='base_image_url', help='Full Docker i
 create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan). Only works with base images, not GitHub URLs.')
 create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 create_parser.add_argument('--root', dest='run_as_root', action='store_true', help='Run package installation commands as root user (useful for images that run as non-root by default)')
+create_parser.add_argument('--break-system-packages', dest='break_system_packages', action='store_true', help='Use --break-system-packages flag when installing acido with pip (for externally managed Python environments)')
+create_parser.add_argument('--entrypoint', dest='custom_entrypoint', help='Override the default ENTRYPOINT in the Dockerfile (e.g., "/bin/bash")')
+create_parser.add_argument('--cmd', dest='custom_cmd', help='Override the default CMD in the Dockerfile (e.g., "sleep infinity")')
 
 # Configure subcommand (alias for -c/--config)
 configure_parser = subparsers.add_parser('configure', help='Configure acido (alias for -c/--config)')
@@ -195,6 +198,18 @@ parser.add_argument("--root",
                     dest="run_as_root",
                     help="Run package installation commands as root user (useful for images that run as non-root by default)",
                     action='store_true')
+parser.add_argument("--break-system-packages",
+                    dest="break_system_packages",
+                    help="Use --break-system-packages flag when installing acido with pip (for externally managed Python environments)",
+                    action='store_true')
+parser.add_argument("--entrypoint",
+                    dest="custom_entrypoint",
+                    help="Override the default ENTRYPOINT in the Dockerfile (e.g., '/bin/bash')",
+                    action='store')
+parser.add_argument("--cmd",
+                    dest="custom_cmd",
+                    help="Override the default CMD in the Dockerfile (e.g., 'sleep infinity')",
+                    action='store')
 
 
 args = parser.parse_args()
@@ -1217,7 +1232,7 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
-    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False) -> str:
+    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
         """Generate Dockerfile content based on distro and install custom packages."""
         
         # Validate all package names to prevent command injection
@@ -1238,6 +1253,29 @@ class Acido(object):
         # This is needed for images that run as non-root by default (e.g., alpine/nikto)
         user_root_directive = '\n# Switch to root user for package installation\nUSER root\n' if run_as_root else ''
         
+        # Add --break-system-packages flag if needed (for PEP 668 externally managed environments)
+        pip_install_flags = '--break-system-packages ' if break_system_packages else ''
+        
+        # Set default ENTRYPOINT and CMD or use custom values
+        entrypoint = custom_entrypoint if custom_entrypoint is not None else '[]'
+        cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
+        
+        # Format entrypoint and cmd for Dockerfile
+        # If they look like JSON arrays, use as-is, otherwise treat as shell form
+        if entrypoint.startswith('['):
+            entrypoint_line = f'ENTRYPOINT {entrypoint}'
+        elif entrypoint:
+            entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
+        else:
+            entrypoint_line = 'ENTRYPOINT []'
+            
+        if cmd.startswith('['):
+            cmd_line = f'CMD {cmd}'
+        elif cmd:
+            cmd_line = f'CMD ["{cmd}"]'
+        else:
+            cmd_line = 'CMD ["sleep", "infinity"]'
+        
         if distro_info['type'] == 'alpine':
             # Build apk install command if packages are specified
             pkg_install = ''
@@ -1253,10 +1291,10 @@ class Acido(object):
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers
 {pkg_install}
 # Upgrade pip and install acido (psutil will build from source)
-RUN python3 -m pip install --upgrade pip && python3 -m pip install acido
+RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_flags}acido
 
-ENTRYPOINT []
-CMD ["sleep", "infinity"]
+{entrypoint_line}
+{cmd_line}
 """
         elif distro_info['type'] == 'rhel':
             pkg_manager = distro_info['pkg_manager']
@@ -1278,10 +1316,10 @@ CMD ["sleep", "infinity"]
 RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all
 {pkg_install}
 # Upgrade pip and install acido (psutil will build from source)
-RUN python3 -m pip install --upgrade pip && python3 -m pip install acido
+RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_flags}acido
 
-ENTRYPOINT []
-CMD ["sleep", "infinity"]
+{entrypoint_line}
+{cmd_line}
 """
         else:  # Debian/Ubuntu-based
             # Build apt-get install command if packages are specified
@@ -1298,10 +1336,10 @@ CMD ["sleep", "infinity"]
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 {pkg_install}
 # Upgrade pip and install acido (psutil will build from source)
-RUN python3 -m pip install --upgrade pip && python3 -m pip install acido
+RUN python3 -m pip install --upgrade pip && python3 -m pip install {pip_install_flags}acido
 
-ENTRYPOINT []
-CMD ["sleep", "infinity"]
+{entrypoint_line}
+{cmd_line}
 """
 
     def create_acido_image_from_github(self, github_url: str, quiet: bool = False) -> str:
@@ -1510,7 +1548,7 @@ CMD ["sleep", "infinity"]
             
             return new_image_name
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False):
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None):
         """
         Create an acido-compatible Docker image from a base image or GitHub repository.
         
@@ -1520,6 +1558,9 @@ CMD ["sleep", "infinity"]
             install_packages: List of packages to install (e.g., ['nmap', 'masscan']) - only applicable for base images, not GitHub URLs
             no_update: Skip package list update before installing packages - only applicable for base images
             run_as_root: Run package installation commands as root user (useful for images that run as non-root by default)
+            break_system_packages: Use --break-system-packages flag when installing acido with pip
+            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile
+            custom_cmd: Override the default CMD in the Dockerfile
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1569,7 +1610,7 @@ CMD ["sleep", "infinity"]
             pbar.set_description("Generating Dockerfile")
         
         # Generate Dockerfile content
-        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root)
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root, break_system_packages, custom_entrypoint, custom_cmd)
         
         # Create temporary directory and Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1766,7 +1807,10 @@ def main():
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)
         run_as_root = getattr(args, 'run_as_root', False)
-        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root)
+        break_system_packages = getattr(args, 'break_system_packages', False)
+        custom_entrypoint = getattr(args, 'custom_entrypoint', None)
+        custom_cmd = getattr(args, 'custom_cmd', None)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, break_system_packages=break_system_packages, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
 
 if __name__ == "__main__":
     main()
