@@ -142,8 +142,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager_class.return_value = mock_vault_manager
         mock_vault_manager.secret_exists.return_value = True
         
-        # Mock get_secret to return metadata and then the actual secret
+        # Mock get_secret to return expiration, metadata and then the actual secret
         def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-expires':
+                raise Exception('Expiration not set')
             if key == 'test-uuid-1234-metadata':
                 return 'plaintext'
             return 'my-secret-value'
@@ -166,9 +168,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertIn('retrieved and deleted', body['message'])
         mock_vault_manager.secret_exists.assert_called_once_with('test-uuid-1234')
         
-        # Verify both secret and metadata were accessed and deleted
-        self.assertEqual(mock_vault_manager.get_secret.call_count, 2)
-        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
+        # Verify expiration check, metadata, and secret were accessed (3 calls)
+        # and secret + metadata + expiration were attempted to be deleted (3 delete calls)
+        self.assertEqual(mock_vault_manager.get_secret.call_count, 3)
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 3)
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
@@ -388,6 +391,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         
         # Mock get_secret to return metadata and then the actual secret
         def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-expires':
+                raise Exception('Expiration not set')
             if key == 'test-uuid-1234-metadata':
                 return 'plaintext'
             return 'my-secret-value'
@@ -407,9 +412,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         mock_validate.assert_called_once()
         
-        # Verify both secret and metadata were accessed and deleted
-        self.assertEqual(mock_vault_manager.get_secret.call_count, 2)
-        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
+        # Verify expiration check, metadata, and secret were accessed (3 calls)
+        # and secret + metadata + expiration were attempted to be deleted (3 delete calls, last one might fail)
+        self.assertEqual(mock_vault_manager.get_secret.call_count, 3)
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 3)
         
         # Clean up
         del os.environ['CF_SECRET_KEY']
@@ -538,8 +544,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Encrypt a secret with password
         encrypted_value = encrypt_secret('my-secret-value', 'test-password')
         
-        # Mock get_secret to return metadata and then the actual encrypted secret
+        # Mock get_secret to return expiration, metadata and then the actual encrypted secret
         def get_secret_side_effect(key):
+            if key == 'test-uuid-1234-expires':
+                raise Exception('Expiration not set')
             if key == 'test-uuid-1234-metadata':
                 return 'encrypted'
             return encrypted_value
@@ -562,8 +570,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertEqual(body['secret'], 'my-secret-value')
         self.assertIn('retrieved and deleted', body['message'])
         
-        # Verify both secret and metadata were deleted
-        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
+        # Verify secret and metadata were deleted (3 attempts: secret, metadata, expiration)
+        self.assertEqual(mock_vault_manager.delete_secret.call_count, 3)
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')
@@ -974,6 +982,228 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         del os.environ['CORS_ORIGIN']
         importlib.reload(lambda_handler_secrets)
 
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_create_secret_with_expiration(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test creating a secret with expiration timestamp."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        # Future expiration time
+        from datetime import datetime, timedelta, timezone
+        future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires_at = future_time.isoformat()
+        
+        event = {
+            'action': 'create',
+            'secret': 'test-secret',
+            'expires_at': expires_at,
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 201)
+        body = json.loads(response['body'])
+        self.assertIn('uuid', body)
+        self.assertIn('expires_at', body)
+        self.assertEqual(body['expires_at'], expires_at)
+        
+        # Verify vault_manager.set_secret was called 3 times (secret, metadata, expiration)
+        self.assertEqual(mock_vault_manager.set_secret.call_count, 3)
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_create_secret_with_past_expiration(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test creating a secret with past expiration timestamp fails."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        # Past expiration time
+        from datetime import datetime, timedelta, timezone
+        past_time = datetime.now(timezone.utc) - timedelta(hours=1)
+        expires_at = past_time.isoformat()
+        
+        event = {
+            'action': 'create',
+            'secret': 'test-secret',
+            'expires_at': expires_at,
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('must be in the future', body['error'])
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_create_secret_with_invalid_expiration_format(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test creating a secret with invalid expiration format fails."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        event = {
+            'action': 'create',
+            'secret': 'test-secret',
+            'expires_at': 'invalid-timestamp',
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Invalid expires_at format', body['error'])
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_retrieve_expired_secret(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test retrieving an expired secret returns 410 and deletes it."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Past expiration time
+        from datetime import datetime, timedelta, timezone
+        past_time = datetime.now(timezone.utc) - timedelta(hours=1)
+        mock_vault_manager.get_secret.side_effect = lambda key: {
+            'test-uuid-expires': past_time.isoformat(),
+            'test-uuid-metadata': 'plaintext',
+            'test-uuid': 'secret-value'
+        }.get(key, None)
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid',
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 410)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('expired', body['error'].lower())
+        self.assertIn('expired_at', body)
+        
+        # Verify secret was deleted
+        self.assertTrue(mock_vault_manager.delete_secret.called)
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_retrieve_non_expired_secret(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test retrieving a non-expired secret works normally."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Future expiration time
+        from datetime import datetime, timedelta, timezone
+        future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        mock_vault_manager.get_secret.side_effect = lambda key: {
+            'test-uuid-expires': future_time.isoformat(),
+            'test-uuid-metadata': 'plaintext',
+            'test-uuid': 'secret-value'
+        }.get(key, None)
+        
+        event = {
+            'action': 'retrieve',
+            'uuid': 'test-uuid',
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertIn('secret', body)
+        self.assertEqual(body['secret'], 'secret-value')
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_check_expired_secret(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test checking an expired secret returns 410 and deletes it."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Past expiration time
+        from datetime import datetime, timedelta, timezone
+        past_time = datetime.now(timezone.utc) - timedelta(hours=1)
+        mock_vault_manager.get_secret.side_effect = lambda key: {
+            'test-uuid-expires': past_time.isoformat(),
+            'test-uuid-metadata': 'plaintext',
+            'test-uuid': 'secret-value'
+        }.get(key, None)
+        
+        event = {
+            'action': 'check',
+            'uuid': 'test-uuid',
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 410)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('expired', body['error'].lower())
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
+    def test_check_non_expired_secret(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test checking a non-expired secret includes expiration info."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        mock_vault_manager.secret_exists.return_value = True
+        
+        # Future expiration time
+        from datetime import datetime, timedelta, timezone
+        future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires_at = future_time.isoformat()
+        mock_vault_manager.get_secret.side_effect = lambda key: {
+            'test-uuid-expires': expires_at,
+            'test-uuid-metadata': 'plaintext',
+            'test-uuid': 'secret-value'
+        }.get(key, None)
+        
+        event = {
+            'action': 'check',
+            'uuid': 'test-uuid',
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertIn('expires_at', body)
+        self.assertEqual(body['expires_at'], expires_at)
 
 
 if __name__ == '__main__':

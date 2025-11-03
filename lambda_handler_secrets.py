@@ -12,6 +12,7 @@ Optional CloudFlare Turnstile support for bot protection.
 import os
 import uuid
 import traceback
+from datetime import datetime, timezone
 from acido.azure_utils.VaultManager import VaultManager
 from acido.utils.lambda_utils import (
     parse_lambda_event,
@@ -46,12 +47,33 @@ def _handle_create_secret(event, vault_manager):
     """Handle secret creation action."""
     secret_value = event.get('secret')
     password = event.get('password')
+    expires_at = event.get('expires_at')  # Optional expiration timestamp (ISO 8601 format)
     
     if not secret_value:
         return build_error_response(
             'Missing required field: secret',
             headers=CORS_HEADERS
         )
+    
+    # Validate expires_at if provided
+    expiration_datetime = None
+    if expires_at:
+        try:
+            # Parse ISO 8601 timestamp
+            expiration_datetime = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            
+            # Ensure the expiration is in the future
+            now = datetime.now(timezone.utc)
+            if expiration_datetime <= now:
+                return build_error_response(
+                    'expires_at must be in the future',
+                    headers=CORS_HEADERS
+                )
+        except (ValueError, AttributeError) as e:
+            return build_error_response(
+                f'Invalid expires_at format. Expected ISO 8601 format (e.g., "2024-12-31T23:59:59Z"): {str(e)}',
+                headers=CORS_HEADERS
+            )
     
     # Generate UUID for the secret
     secret_uuid = str(uuid.uuid4())
@@ -77,11 +99,21 @@ def _handle_create_secret(event, vault_manager):
     metadata_key = f"{secret_uuid}-metadata"
     vault_manager.set_secret(metadata_key, "encrypted" if is_encrypted_flag else "plaintext")
     
+    # Store expiration metadata if provided
+    if expiration_datetime:
+        expires_key = f"{secret_uuid}-expires"
+        # Store as ISO 8601 string for easy parsing
+        vault_manager.set_secret(expires_key, expiration_datetime.isoformat())
+    
     # Return success response with UUID
-    return build_response(201, {
+    response_data = {
         'uuid': secret_uuid,
         'message': 'Secret created successfully'
-    }, CORS_HEADERS)
+    }
+    if expiration_datetime:
+        response_data['expires_at'] = expiration_datetime.isoformat()
+    
+    return build_response(201, response_data, CORS_HEADERS)
 
 
 def _handle_retrieve_secret(event, vault_manager):
@@ -100,6 +132,33 @@ def _handle_retrieve_secret(event, vault_manager):
         return build_response(404, {
             'error': 'Secret not found or already accessed'
         }, CORS_HEADERS)
+    
+    # Check if secret has expired
+    expires_key = f"{secret_uuid}-expires"
+    try:
+        expires_at_str = vault_manager.get_secret(expires_key)
+        expires_at = datetime.fromisoformat(expires_at_str)
+        now = datetime.now(timezone.utc)
+        
+        if now >= expires_at:
+            # Secret has expired - delete it and all metadata
+            vault_manager.delete_secret(secret_uuid)
+            try:
+                vault_manager.delete_secret(f"{secret_uuid}-metadata")
+            except Exception:
+                pass
+            try:
+                vault_manager.delete_secret(expires_key)
+            except Exception:
+                pass
+            
+            return build_response(410, {
+                'error': 'Secret has expired and has been deleted',
+                'expired_at': expires_at.isoformat()
+            }, CORS_HEADERS)
+    except Exception:
+        # No expiration metadata means secret doesn't expire
+        pass
     
     # Check metadata to determine if secret is encrypted
     metadata_key = f"{secret_uuid}-metadata"
@@ -130,12 +189,17 @@ def _handle_retrieve_secret(event, vault_manager):
                 'error': f'Decryption failed: {str(e)}'
             }, CORS_HEADERS)
     
-    # Delete the secret and metadata (one-time access)
+    # Delete the secret and all metadata (one-time access)
     vault_manager.delete_secret(secret_uuid)
     try:
         vault_manager.delete_secret(metadata_key)
     except Exception:
         # Metadata might not exist for old secrets
+        pass
+    try:
+        vault_manager.delete_secret(expires_key)
+    except Exception:
+        # Expiration metadata might not exist
         pass
     
     # Return success response with secret value
@@ -161,6 +225,36 @@ def _handle_check_secret(event, vault_manager):
             'error': 'Secret not found or already accessed'
         }, CORS_HEADERS)
     
+    # Check if secret has expired
+    expires_key = f"{secret_uuid}-expires"
+    expires_at_str = None
+    is_expired = False
+    try:
+        expires_at_str = vault_manager.get_secret(expires_key)
+        expires_at = datetime.fromisoformat(expires_at_str)
+        now = datetime.now(timezone.utc)
+        
+        if now >= expires_at:
+            is_expired = True
+            # Secret has expired - delete it and all metadata
+            vault_manager.delete_secret(secret_uuid)
+            try:
+                vault_manager.delete_secret(f"{secret_uuid}-metadata")
+            except Exception:
+                pass
+            try:
+                vault_manager.delete_secret(expires_key)
+            except Exception:
+                pass
+            
+            return build_response(410, {
+                'error': 'Secret has expired and has been deleted',
+                'expired_at': expires_at.isoformat()
+            }, CORS_HEADERS)
+    except Exception:
+        # No expiration metadata means secret doesn't expire
+        pass
+    
     # Check metadata to determine if secret is encrypted (bulletproof method)
     metadata_key = f"{secret_uuid}-metadata"
     try:
@@ -172,10 +266,14 @@ def _handle_check_secret(event, vault_manager):
         encrypted = is_encrypted(secret_value)
     
     # Return check result
-    return build_response(200, {
+    response_data = {
         'encrypted': encrypted,
         'requires_password': encrypted
-    }, CORS_HEADERS)
+    }
+    if expires_at_str:
+        response_data['expires_at'] = expires_at_str
+    
+    return build_response(200, response_data, CORS_HEADERS)
 
 
 def lambda_handler(event, context):
@@ -187,6 +285,7 @@ def lambda_handler(event, context):
         "action": "create",
         "secret": "my-secret-value",
         "password": "optional-password-for-encryption",
+        "expires_at": "optional-expiration-timestamp-iso8601",
         "turnstile_token": "cloudflare-turnstile-token"
     }
     
@@ -216,6 +315,7 @@ def lambda_handler(event, context):
             "action": "create",
             "secret": "my-secret-value",
             "password": "optional-password-for-encryption",
+            "expires_at": "2024-12-31T23:59:59Z",
             "turnstile_token": "cloudflare-turnstile-token"
         }
     }
@@ -234,6 +334,12 @@ def lambda_handler(event, context):
     - If "password" is provided during creation, the secret will be encrypted with AES-256
     - The same password must be provided during retrieval to decrypt the secret
     - If no password is provided, the secret is stored as-is (backward compatible)
+    
+    Time-based expiration:
+    - If "expires_at" is provided during creation, the secret will expire at that time
+    - Format: ISO 8601 timestamp (e.g., "2024-12-31T23:59:59Z")
+    - Expired secrets are automatically deleted when accessed
+    - If no expiration is provided, the secret never expires (backward compatible)
     
     Returns:
         dict: Response with statusCode and body containing operation result
