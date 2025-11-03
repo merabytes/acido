@@ -1,8 +1,26 @@
-# acido
+# acido &nbsp;🔥
+[![GitHub release](https://img.shields.io/github/v/release/merabytes/acido?include_prereleases&color=blueviolet)](https://github.com/merabytes/acido/releases)
+[![Build](https://img.shields.io/github/actions/workflow/status/merabytes/acido/ci.yml?label=build&logo=github)](https://github.com/merabytes/acido/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
+[![Live Demo](https://img.shields.io/badge/docs-online-blue?logo=readthedocs)](https://secrets.merabytes.com)
+[![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat&logo=github)](https://github.com/merabytes/acido/pulls)
+[![Twitter Follow](https://img.shields.io/twitter/follow/merabytes?style=social)](https://twitter.com/merabytes)
 
-**Distributed security scanning framework for Azure Container Instances.**
 
-Acido (**A**zure **C**ontainer **I**nstance **D**istributed **O**perations) enables bug bounty hunters, penetration testers, and red team operators to scan at massive scale by distributing workloads across multiple Azure containers.
+> **The open-source engine powering [Secrets by Merabytes](https://secrets.merabytes.com)**  
+> Disrupting how secrets, tokens, and one-time credentials are shared — forever.
+
+acido isn’t just another CLI tool. It’s the backbone of an infrastructure-first rethink of how secrets, tokens and one-time credentials are built, deployed and consumed.
+
+Already powering Secrets by Merabytes — the first truly open-source secret-sharing app — acido installs like a developer tool and scales like an enterprise service.
+
+Deploy fleets of workloads on Azure Container Instances in minutes.
+
+Leverage full transparency: open source, auditable, no lock-in.
+
+Built for the next generation of identity, secrets and “one-time everything”.
+
+Whether you’re building a secure secret-sharing system, a distributor of short-lived credentials, or simply pushing containerised tasks to the edge — acido gives you the power, the scale and the freedom of open source.
 
 ## Table of Contents
 
