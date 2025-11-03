@@ -9,6 +9,7 @@ The service uses Azure KeyVault for secure secret storage.
 Optional CloudFlare Turnstile support for bot protection.
 """
 
+import os
 import uuid
 import traceback
 from acido.azure_utils.VaultManager import VaultManager
@@ -23,9 +24,9 @@ from acido.utils.crypto_utils import encrypt_secret, decrypt_secret, is_encrypte
 from acido.utils.turnstile_utils import validate_turnstile
 
 
-# CORS headers for merabytes.com domains
+# CORS headers - origin is configurable via CORS_ORIGIN environment variable
 CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "https://www.merabytes.com",
+    "Access-Control-Allow-Origin": os.environ.get("CORS_ORIGIN", "https://secrets.merabytes.com"),
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type",
     "Content-Type": "application/json"
@@ -235,6 +236,9 @@ def lambda_handler(event, context):
     - AZURE_CLIENT_ID
     - AZURE_CLIENT_SECRET
     - CF_SECRET_KEY: CloudFlare Turnstile secret key (bot protection is always enabled)
+    
+    Environment variables optional:
+    - CORS_ORIGIN: CORS origin URL (default: https://secrets.merabytes.com)
     
     Password-based encryption:
     - If "password" is provided during creation, the secret will be encrypted with AES-256
