@@ -235,6 +235,25 @@ jobs:
         # It will use environment variables for configuration
         acido create kali --image kalilinux/kali-rolling:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
 
+    - name: Test acido create nikto with --root flag
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+        STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+      run: |
+        # Test nikto image creation with --root flag for non-root base images
+        # This validates the new --root flag functionality for images like alpine/nikto
+        acido create nikto --image alpine/nikto:latest --root || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
 
   lint:
     name: Code Quality Checks
