@@ -292,6 +292,111 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertIn('error', body)
         self.assertIn('Missing required fields', body['error'])
 
+    @patch('lambda_handler.Acido')
+    def test_ip_create_operation(self, mock_acido_class):
+        """Test ip_create operation to create IPv4 address."""
+        # Setup mocks
+        mock_acido = MagicMock()
+        mock_acido_class.return_value = mock_acido
+        mock_acido.create_ipv4_address.return_value = None
+        
+        event = {
+            'operation': 'ip_create',
+            'name': 'pentest-ip'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['operation'], 'ip_create')
+        self.assertIn('result', body)
+        self.assertEqual(body['result']['created'], 'pentest-ip')
+        
+        # Verify create_ipv4_address was called with correct name
+        mock_acido.create_ipv4_address.assert_called_once_with('pentest-ip')
+
+    @patch('lambda_handler.Acido')
+    def test_ip_ls_operation(self, mock_acido_class):
+        """Test ip_ls operation to list IPv4 addresses."""
+        # Setup mocks
+        mock_acido = MagicMock()
+        mock_acido_class.return_value = mock_acido
+        mock_acido.ls_ip.return_value = [
+            {'name': 'pentest-ip', 'ip_address': '20.123.45.67'}
+        ]
+        
+        event = {
+            'operation': 'ip_ls'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['operation'], 'ip_ls')
+        self.assertIn('ip_addresses', body)
+        self.assertEqual(len(body['ip_addresses']), 1)
+        self.assertEqual(body['ip_addresses'][0]['name'], 'pentest-ip')
+
+    @patch('lambda_handler.Acido')
+    def test_ip_rm_operation(self, mock_acido_class):
+        """Test ip_rm operation to remove IPv4 address."""
+        # Setup mocks
+        mock_acido = MagicMock()
+        mock_acido_class.return_value = mock_acido
+        mock_acido.rm_ip.return_value = True
+        
+        event = {
+            'operation': 'ip_rm',
+            'name': 'pentest-ip'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['operation'], 'ip_rm')
+        self.assertIn('result', body)
+        self.assertEqual(body['result']['removed'], 'pentest-ip')
+        self.assertTrue(body['result']['success'])
+        
+        # Verify rm_ip was called with correct name
+        mock_acido.rm_ip.assert_called_once_with('pentest-ip')
+
+    def test_ip_create_missing_name(self):
+        """Test ip_create operation with missing name field."""
+        event = {
+            'operation': 'ip_create'
+            # Missing name field
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Missing required fields', body['error'])
+
+    def test_ip_rm_missing_name(self):
+        """Test ip_rm operation with missing name field."""
+        event = {
+            'operation': 'ip_rm'
+            # Missing name field
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Missing required fields', body['error'])
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -18,7 +18,7 @@ from acido.utils.lambda_utils import (
 )
 
 # Valid operation types
-VALID_OPERATIONS = ['fleet', 'run', 'ls', 'rm']
+VALID_OPERATIONS = ['fleet', 'run', 'ls', 'rm', 'ip_create', 'ip_ls', 'ip_rm']
 
 def _validate_targets(targets):
     """Validate targets parameter."""
@@ -97,11 +97,29 @@ def _execute_rm(acido, name):
     return {'removed': name}
 
 
+def _execute_ip_create(acido, name):
+    """Execute ip_create operation to create IPv4 address and network profile."""
+    acido.create_ipv4_address(name)
+    return {'created': name}
+
+
+def _execute_ip_ls(acido):
+    """Execute ip_ls operation to list all IPv4 addresses."""
+    ip_addresses_info = acido.ls_ip(interactive=False)
+    return ip_addresses_info if ip_addresses_info else []
+
+
+def _execute_ip_rm(acido, name):
+    """Execute ip_rm operation to remove IPv4 address and network profile."""
+    success = acido.rm_ip(name)
+    return {'removed': name, 'success': success}
+
+
 def lambda_handler(event, context):
     """
     AWS Lambda handler for acido distributed scanning and ephemeral runners.
     
-    Supports four operations:
+    Supports seven operations:
     
     1. Fleet operation (default) - Multiple container instances for distributed scanning:
     {
@@ -130,6 +148,23 @@ def lambda_handler(event, context):
     {
         "operation": "rm",
         "name": "container-group-name"  // can use wildcards like "fleet*"
+    }
+    
+    5. IP Create operation - Create IPv4 address and network profile:
+    {
+        "operation": "ip_create",
+        "name": "pentest-ip"
+    }
+    
+    6. IP List operation - List all IPv4 addresses:
+    {
+        "operation": "ip_ls"
+    }
+    
+    7. IP Remove operation - Remove IPv4 address and network profile:
+    {
+        "operation": "ip_rm",
+        "name": "pentest-ip"
     }
     
     Or with body wrapper:
@@ -195,6 +230,27 @@ def lambda_handler(event, context):
     elif operation == 'ls':
         # ls operation doesn't require any additional fields
         pass
+    elif operation == 'ip_create':
+        # ip_create operation requires 'name' field
+        required_fields = ['name']
+        is_valid, missing_fields = validate_required_fields(event, required_fields)
+        
+        if not is_valid:
+            return build_error_response(
+                f'Missing required fields for ip_create operation: {", ".join(missing_fields)}'
+            )
+    elif operation == 'ip_ls':
+        # ip_ls operation doesn't require any additional fields
+        pass
+    elif operation == 'ip_rm':
+        # ip_rm operation requires 'name' field
+        required_fields = ['name']
+        is_valid, missing_fields = validate_required_fields(event, required_fields)
+        
+        if not is_valid:
+            return build_error_response(
+                f'Missing required fields for ip_rm operation: {", ".join(missing_fields)}'
+            )
     else:  # operation == 'fleet'
         required_fields = ['image', 'targets', 'task']
         is_valid, missing_fields = validate_required_fields(event, required_fields)
@@ -256,6 +312,38 @@ def lambda_handler(event, context):
             # Return successful response
             return build_response(200, {
                 'operation': 'rm',
+                'result': result
+            })
+        
+        elif operation == 'ip_create':
+            # IP Create operation: create IPv4 address and network profile
+            name = event.get('name')
+            result = _execute_ip_create(acido, name)
+            
+            # Return successful response
+            return build_response(200, {
+                'operation': 'ip_create',
+                'result': result
+            })
+        
+        elif operation == 'ip_ls':
+            # IP List operation: list all IPv4 addresses
+            ip_addresses = _execute_ip_ls(acido)
+            
+            # Return successful response
+            return build_response(200, {
+                'operation': 'ip_ls',
+                'ip_addresses': ip_addresses
+            })
+        
+        elif operation == 'ip_rm':
+            # IP Remove operation: remove IPv4 address and network profile
+            name = event.get('name')
+            result = _execute_ip_rm(acido, name)
+            
+            # Return successful response
+            return build_response(200, {
+                'operation': 'ip_rm',
                 'result': result
             })
             

@@ -232,6 +232,12 @@ acido ls
 # Remove container instances
 acido rm <name-or-pattern>
 
+# IP address management
+acido ip create <name>    # Create IPv4 address and network profile
+acido ip ls               # List all IPv4 addresses
+acido ip rm <name>        # Remove IPv4 address and network profile
+acido ip select           # Select an IPv4 address to use
+
 # Select instances by pattern
 acido select <pattern>
 
@@ -438,15 +444,26 @@ acido create git+https://github.com/myorg/custom-scanner@abc123def456
 Route all containers through one IP for whitelisting:
 
 ```bash
-# Create IP
-acido --create-ip pentest-ip
+# Create IP address and network profile
+acido ip create pentest-ip
+
+# List all IPv4 addresses
+acido ip ls
+
+# Select IP address interactively
+acido ip select
 
 # Deploy with IP routing
-acido fleet scan -n 50 --ip \
+acido fleet scan -n 50 \
     -im nmap \
     -t 'nmap -iL input -p-' \
     -i targets.txt
+
+# Remove IP address when done
+acido ip rm pentest-ip
 ```
+
+**Note:** The old syntax (`acido --create-ip <name>` and `acido --ip`) is still supported for backward compatibility.
 
 ## AWS Lambda Support
 
@@ -457,6 +474,63 @@ Acido can be deployed as an AWS Lambda function, enabling serverless security sc
 - Automatic container provisioning in Azure
 - JSON-based event interface
 - Continuous deployment via GitHub Actions
+- **New:** Full CRUD operations support (fleet, run, ls, rm, ip)
+
+**Supported Operations:**
+
+1. **Fleet Operation** - Distributed scanning across multiple containers:
+```json
+{
+  "operation": "fleet",
+  "image": "nmap",
+  "targets": ["merabytes.com", "uber.com"],
+  "task": "nmap -iL input -p 0-1000"
+}
+```
+
+2. **Run Operation** - Single ephemeral instance:
+```json
+{
+  "operation": "run",
+  "name": "runner-01",
+  "image": "ubuntu",
+  "task": "./run.sh"
+}
+```
+
+3. **List Operation** - List all container instances:
+```json
+{
+  "operation": "ls"
+}
+```
+
+4. **Remove Operation** - Remove container instances:
+```json
+{
+  "operation": "rm",
+  "name": "fleet-1"
+}
+```
+
+5. **IP Management Operations** - Manage IPv4 addresses:
+```json
+{
+  "operation": "ip_create",
+  "name": "pentest-ip"
+}
+```
+```json
+{
+  "operation": "ip_ls"
+}
+```
+```json
+{
+  "operation": "ip_rm",
+  "name": "pentest-ip"
+}
+```
 
 **Quick Example:**
 ```json
@@ -469,6 +543,7 @@ Acido can be deployed as an AWS Lambda function, enabling serverless security sc
 
 **Documentation:**
 - See [LAMBDA.md](LAMBDA.md) for complete deployment and usage instructions
+- See [LAMBDA_API_EXAMPLES.md](LAMBDA_API_EXAMPLES.md) for detailed API usage examples and CLI equivalents
 - Example payload: [examples/example_lambda_payload.json](examples/example_lambda_payload.json)
 - Automatic deployment workflow: [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml)
 

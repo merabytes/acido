@@ -102,6 +102,81 @@ Remove multiple instances using wildcards:
 }
 ```
 
+### 5. IP Create Operation
+
+Create a new IPv4 address and network profile:
+
+```json
+{
+  "operation": "ip_create",
+  "name": "pentest-ip"
+}
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "body": {
+    "operation": "ip_create",
+    "result": {
+      "created": "pentest-ip"
+    }
+  }
+}
+```
+
+### 6. IP List Operation
+
+List all IPv4 addresses:
+
+```json
+{
+  "operation": "ip_ls"
+}
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "body": {
+    "operation": "ip_ls",
+    "ip_addresses": [
+      {
+        "name": "pentest-ip",
+        "ip_address": "20.123.45.67"
+      }
+    ]
+  }
+}
+```
+
+### 7. IP Remove Operation
+
+Remove IPv4 address and network profile:
+
+```json
+{
+  "operation": "ip_rm",
+  "name": "pentest-ip"
+}
+```
+
+**Response:**
+```json
+{
+  "statusCode": 200,
+  "body": {
+    "operation": "ip_rm",
+    "result": {
+      "removed": "pentest-ip",
+      "success": true
+    }
+  }
+}
+```
+
 ## Using with API Gateway
 
 When using with API Gateway, wrap the payload in a `body` field:
@@ -122,19 +197,9 @@ When using with API Gateway, wrap the payload in a `body` field:
 | `{"operation": "run", ...}` | `acido run <name> -im <image> -t <task> ...` |
 | `{"operation": "ls"}` | `acido ls` |
 | `{"operation": "rm", "name": "..."}` | `acido rm <name>` |
-
-## IP Address Management
-
-The CLI has been refactored to use subcommands for IP address management:
-
-| Old CLI Command | New CLI Command |
-|----------------|-----------------|
-| `acido --create-ip <name>` | `acido ip create <name>` |
-| `acido --ip` | `acido ip select` |
-| N/A | `acido ip ls` |
-| N/A | `acido ip rm <name>` |
-
-Note: IP address management is not yet exposed via the lambda_handler API, as it's primarily used for configuration.
+| `{"operation": "ip_create", "name": "..."}` | `acido ip create <name>` |
+| `{"operation": "ip_ls"}` | `acido ip ls` |
+| `{"operation": "ip_rm", "name": "..."}` | `acido ip rm <name>` |
 
 ## Error Responses
 
