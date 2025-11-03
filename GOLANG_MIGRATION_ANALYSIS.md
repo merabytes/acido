@@ -1503,6 +1503,56 @@ golangci-lint run
 
 ---
 
+## Appendix B: Implementation Notes
+
+### Code Review Considerations
+
+When implementing the migration, address these recommendations:
+
+1. **Azure SDK Versions** - The example `go.mod` uses `+incompatible` versions for demonstration. Use the latest stable Azure SDK versions that follow semantic versioning:
+   ```
+   github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerinstance/armcontainerinstance v4.0.0
+   github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/network/armnetwork v5.0.0
+   ```
+
+2. **Linter Configuration** - Create a `.golangci.yml` configuration file to ensure consistent code quality:
+   ```yaml
+   linters:
+     enable:
+       - gofmt
+       - govet
+       - errcheck
+       - staticcheck
+       - unused
+       - gosec
+   ```
+
+3. **Version Variable Path** - Adjust the Makefile LDFLAGS to match your final package structure:
+   ```makefile
+   LDFLAGS=-ldflags "-s -w -X github.com/merabytes/acido/internal/version.Version=${VERSION}"
+   ```
+
+4. **Credential Security** - Always validate environment variables and document secure credential practices:
+   ```go
+   func validateCredentials() error {
+       required := []string{"AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_CLIENT_SECRET"}
+       for _, env := range required {
+           if os.Getenv(env) == "" {
+               return fmt.Errorf("required environment variable %s is not set", env)
+           }
+       }
+       return nil
+   }
+   ```
+   
+   Additionally:
+   - Use Azure Key Vault for production secrets
+   - Never commit credentials to source control
+   - Use managed identities where possible
+   - Implement credential rotation policies
+
+---
+
 **Document Version:** 1.0  
 **Date:** November 2025  
 **Author:** AI Migration Consultant  
