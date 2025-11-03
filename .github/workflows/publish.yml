@@ -2,7 +2,9 @@ name: Publish to PyPI
 
 on:
   push:
-    branches: [ main ]
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -25,6 +27,19 @@ jobs:
     - name: Build distribution packages
       run: |
         python -m build
+
+    - name: Check version consistency
+      run: |
+        if [ "${{ github.event_name }}" = "push" ]; then
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          SETUP_VERSION=$(grep "version=" setup.py | cut -d"'" -f2)
+          echo "Tag version: $TAG_VERSION"
+          echo "setup.py version: $SETUP_VERSION"
+          if [ "$TAG_VERSION" != "$SETUP_VERSION" ]; then
+            echo "::error::Version mismatch! Tag is v$TAG_VERSION but setup.py has $SETUP_VERSION"
+            exit 1
+          fi
+        fi
 
     - name: Publish to PyPI
       env:

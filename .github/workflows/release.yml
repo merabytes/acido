@@ -1,0 +1,127 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.42.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    name: Build Distribution Packages
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel build
+
+    - name: Extract version from tag or input
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION="${GITHUB_REF#refs/tags/v}"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Building version: $VERSION"
+
+    - name: Verify version matches setup.py
+      run: |
+        SETUP_VERSION=$(grep "version=" setup.py | cut -d"'" -f2)
+        INPUT_VERSION="${{ steps.version.outputs.version }}"
+        echo "setup.py version: $SETUP_VERSION"
+        echo "Tag/Input version: $INPUT_VERSION"
+        if [ "$SETUP_VERSION" != "$INPUT_VERSION" ]; then
+          echo "::warning::Version mismatch: setup.py has $SETUP_VERSION but tag/input is $INPUT_VERSION"
+        fi
+
+    - name: Build distribution packages
+      run: |
+        python -m build
+
+    - name: Generate checksum
+      run: |
+        cd dist
+        sha256sum * > checksums.txt
+        cat checksums.txt
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: dist-packages-${{ steps.version.outputs.version }}
+        path: dist/
+        retention-days: 90
+
+    - name: Create Release
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+          dist/checksums.txt
+        body: |
+          ## acido ${{ steps.version.outputs.version }}
+          
+          ### Installation
+          ```bash
+          pip install acido==${{ steps.version.outputs.version }}
+          ```
+          
+          Or download the wheel/source distribution from the assets below.
+          
+          ### Checksums
+          See `checksums.txt` for SHA256 checksums of all artifacts.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: dist-packages-${{ needs.build.outputs.version }}
+        path: dist/
+
+    - name: Install twine
+      run: |
+        python -m pip install --upgrade pip twine
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        python -m twine upload dist/*.whl dist/*.tar.gz
