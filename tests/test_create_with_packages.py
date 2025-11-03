@@ -87,6 +87,7 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertIn('FROM ubuntu:20.04', dockerfile)
         self.assertIn('# Install custom packages', dockerfile)
         self.assertIn('apt-get update && apt-get install -y nmap masscan', dockerfile)
+        self.assertIn('pip install --upgrade pip', dockerfile)
         self.assertIn('pip install acido', dockerfile)
         
         # Verify installation order: Python deps, then custom packages, then acido
@@ -113,6 +114,7 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertIn('FROM alpine:3.14', dockerfile)
         self.assertIn('# Install custom packages', dockerfile)
         self.assertIn('apk update && apk add --no-cache nmap masscan', dockerfile)
+        self.assertIn('pip install --upgrade pip', dockerfile)
         self.assertIn('pip install acido', dockerfile)
 
     def test_generate_dockerfile_kali_auto_install(self):
@@ -161,6 +163,7 @@ class TestCreateWithPackages(unittest.TestCase):
         
         # Check that no custom package installation is present
         self.assertNotIn('# Install custom packages', dockerfile)
+        self.assertIn('pip install --upgrade pip', dockerfile)
         self.assertIn('pip install acido', dockerfile)
 
     def test_generate_dockerfile_invalid_packages_filtered(self):
