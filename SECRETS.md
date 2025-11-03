@@ -317,6 +317,7 @@ Retrieve and delete a secret using its UUID (one-time access). Provide password 
    - `AZURE_TENANT_ID`
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
+   - `CORS_ORIGIN` (Optional - defaults to `https://secrets.merabytes.com`)
 
 4. **CloudFlare Turnstile** (Optional - for bot protection):
    - Create a Turnstile site at https://dash.cloudflare.com/
@@ -349,19 +350,7 @@ aws lambda update-function-code \
   --image-uri <ECR_REGISTRY>/acido-secrets:latest
 ```
 
-4. **Set environment variables (without Turnstile):**
-```bash
-aws lambda update-function-configuration \
-  --function-name AcidoSecrets \
-  --environment "Variables={
-    KEY_VAULT_NAME=<your-vault-name>,
-    AZURE_TENANT_ID=<tenant-id>,
-    AZURE_CLIENT_ID=<client-id>,
-    AZURE_CLIENT_SECRET=<client-secret>
-  }"
-```
-
-5. **Set environment variables (with Turnstile):**
+4. **Set environment variables (minimal configuration):**
 ```bash
 aws lambda update-function-configuration \
   --function-name AcidoSecrets \
@@ -370,9 +359,50 @@ aws lambda update-function-configuration \
     AZURE_TENANT_ID=<tenant-id>,
     AZURE_CLIENT_ID=<client-id>,
     AZURE_CLIENT_SECRET=<client-secret>,
+    CORS_ORIGIN=https://secrets.merabytes.com
+  }"
+```
+
+5. **Set environment variables (with all optional features):**
+```bash
+aws lambda update-function-configuration \
+  --function-name AcidoSecrets \
+  --environment "Variables={
+    KEY_VAULT_NAME=<your-vault-name>,
+    AZURE_TENANT_ID=<tenant-id>,
+    AZURE_CLIENT_ID=<client-id>,
+    AZURE_CLIENT_SECRET=<client-secret>,
+    CORS_ORIGIN=<your-cors-origin-url>,
     CF_SECRET_KEY=<cloudflare-turnstile-secret-key>
   }"
 ```
+
+## CORS Configuration
+
+The Lambda function supports Cross-Origin Resource Sharing (CORS) to allow web applications to interact with the secrets API. The CORS origin URL can be configured through the `CORS_ORIGIN` environment variable.
+
+### Configuration
+
+- **Default**: If not specified, defaults to `https://secrets.merabytes.com`
+- **Custom**: Set `CORS_ORIGIN` environment variable to your frontend URL
+
+**Example:**
+```bash
+# Set custom CORS origin
+aws lambda update-function-configuration \
+  --function-name AcidoSecrets \
+  --environment "Variables={...,CORS_ORIGIN=https://myapp.example.com}"
+```
+
+**In GitHub Actions:**
+Add `CORS_ORIGIN` to your repository secrets to configure it during deployment.
+
+### CORS Headers
+
+The service responds with the following CORS headers:
+- `Access-Control-Allow-Origin`: Configurable via `CORS_ORIGIN` (default: `https://secrets.merabytes.com`)
+- `Access-Control-Allow-Methods`: `POST, OPTIONS`
+- `Access-Control-Allow-Headers`: `Content-Type`
 
 ## CloudFlare Turnstile Integration
 

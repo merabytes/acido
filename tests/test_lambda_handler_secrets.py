@@ -34,6 +34,9 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Ensure CF_SECRET_KEY is not set by default (Turnstile is optional)
         if 'CF_SECRET_KEY' in os.environ:
             del os.environ['CF_SECRET_KEY']
+        # Ensure CORS_ORIGIN is not set by default (will use default)
+        if 'CORS_ORIGIN' in os.environ:
+            del os.environ['CORS_ORIGIN']
 
     def test_missing_body(self):
         """Test handler with missing body."""
@@ -701,7 +704,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Verify
         self.assertEqual(response['statusCode'], 200)
         self.assertIn('headers', response)
-        self.assertEqual(response['headers']['Access-Control-Allow-Origin'], 'https://www.merabytes.com')
+        # Default CORS origin is now https://secrets.merabytes.com
+        self.assertEqual(response['headers']['Access-Control-Allow-Origin'], 'https://secrets.merabytes.com')
         body = json.loads(response['body'])
         self.assertEqual(body['status'], 'healthy')
         self.assertIn('version', body)
@@ -718,7 +722,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Verify CORS headers
         self.assertIn('headers', response)
         headers = response['headers']
-        self.assertEqual(headers['Access-Control-Allow-Origin'], 'https://www.merabytes.com')
+        # Default CORS origin is now https://secrets.merabytes.com
+        self.assertEqual(headers['Access-Control-Allow-Origin'], 'https://secrets.merabytes.com')
         self.assertEqual(headers['Access-Control-Allow-Methods'], 'POST, OPTIONS')
         self.assertEqual(headers['Access-Control-Allow-Headers'], 'Content-Type')
         self.assertEqual(headers['Content-Type'], 'application/json')
@@ -942,6 +947,32 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         import base64
         short_data = base64.b64encode(b'short').decode()
         self.assertFalse(is_encrypted(short_data))
+
+    def test_cors_origin_env_var(self):
+        """Test that CORS origin can be configured via environment variable."""
+        # Set custom CORS origin
+        os.environ['CORS_ORIGIN'] = 'https://custom.example.com'
+        
+        # Need to reload the module to pick up the new env var
+        import importlib
+        import lambda_handler_secrets
+        importlib.reload(lambda_handler_secrets)
+        
+        event = {
+            'action': 'healthcheck'
+        }
+        context = {}
+        
+        response = lambda_handler_secrets.lambda_handler(event, context)
+        
+        # Verify custom CORS origin is used
+        self.assertEqual(response['statusCode'], 200)
+        self.assertIn('headers', response)
+        self.assertEqual(response['headers']['Access-Control-Allow-Origin'], 'https://custom.example.com')
+        
+        # Clean up - reload again with default
+        del os.environ['CORS_ORIGIN']
+        importlib.reload(lambda_handler_secrets)
 
 
 
