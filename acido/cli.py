@@ -806,6 +806,11 @@ class Acido(object):
     def save_output(self, command: list = None):
         output = None
         try:
+            # Auto-download input if ACIDO_INPUT_UUID environment variable is set
+            input_uuid = os.getenv('ACIDO_INPUT_UUID')
+            if input_uuid:
+                self.load_input(input_uuid, filename='input', write_to_file=True)
+            
             output = subprocess.check_output(command.split(' '))
             file, filename = self.blob_manager.upload(
                 output

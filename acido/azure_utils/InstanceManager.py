@@ -98,8 +98,8 @@ class InstanceManager(ManagedIdentity):
 
             if input_files:
                 file_uuid = input_files.pop(0)
-                upload_command = f"acido -d {file_uuid}"
-                scan_cmd = f"{upload_command} && {scan_cmd}" if scan_cmd else upload_command
+                # Pass input UUID via environment variable instead of chained command
+                env_vars['ACIDO_INPUT_UUID'] = file_uuid
 
             deploy_instances.append(
                 self.provision(
