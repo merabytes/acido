@@ -245,10 +245,13 @@ acido exec <command> [options]
 acido create <name> [options]
 
 Options:
-  --image IMAGE_URL        Full Docker image URL (e.g., 'projectdiscovery/nuclei:latest')
-  --install PACKAGE        Install additional package (can be used multiple times)
-  --no-update             Skip package list update before installing packages
-  --root                  Run as root user (for images that default to non-root)
+  --image IMAGE_URL           Full Docker image URL (e.g., 'projectdiscovery/nuclei:latest')
+  --install PACKAGE           Install additional package (can be used multiple times)
+  --no-update                 Skip package list update before installing packages
+  --root                      Run as root user (for images that default to non-root)
+  --break-system-packages     Use --break-system-packages for pip (for externally managed Python)
+  --entrypoint ENTRYPOINT     Override default ENTRYPOINT (e.g., "/bin/bash")
+  --cmd CMD                   Override default CMD (e.g., "sleep infinity")
 
 Examples:
   # Create from base image
@@ -259,6 +262,12 @@ Examples:
   
   # Install additional packages
   acido create custom --image alpine:latest --root --install python3 --install nmap
+  
+  # Use --break-system-packages for externally managed Python environments
+  acido create nuclei --image projectdiscovery/nuclei:latest --break-system-packages
+  
+  # Custom entrypoint and command
+  acido create ubuntu --image ubuntu:20.04 --entrypoint "/bin/bash" --cmd "echo hello"
   
   # Build from GitHub repository
   acido create git+https://github.com/user/repo@main

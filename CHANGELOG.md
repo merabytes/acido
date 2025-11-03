@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.44.0] - 2025-11-03
 
+### Added
+- **New `acido create` options** for enhanced Dockerfile generation:
+  - `--break-system-packages`: Use `--break-system-packages` flag when installing acido with pip (for externally managed Python environments per PEP 668)
+  - `--entrypoint`: Override the default ENTRYPOINT in the generated Dockerfile
+  - `--cmd`: Override the default CMD in the generated Dockerfile
+  - Fixes CI nuclei test failures on images with externally managed Python
+
 ### Changed
 - **Simplified Input Handling**: Fleet operations now use environment variables instead of chained commands
   - Input file UUID is now passed via `ACIDO_INPUT_UUID` environment variable
@@ -15,10 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Commands are now cleaner: just `acido -sh '<command>'`
   - Reduces overhead and improves code maintainability
 - **Version Management**: Updated from 0.43.0 to 0.44.0
+- **CI Workflow**: Added test for `--root` flag with nuclei image
 
 ### Technical Details
 - Modified `InstanceManager.deploy()` to set `ACIDO_INPUT_UUID` environment variable
 - Modified `Acido.save_output()` to auto-download input when environment variable is present
+- Modified `_generate_dockerfile()` to support new customization options
 - Backward compatible: `-d` flag still works when called manually
 
 ## [0.42.0] - 2025-01-03
