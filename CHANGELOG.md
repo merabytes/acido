@@ -5,6 +5,22 @@ All notable changes to acido will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.44.0] - 2025-11-03
+
+### Changed
+- **Simplified Input Handling**: Fleet operations now use environment variables instead of chained commands
+  - Input file UUID is now passed via `ACIDO_INPUT_UUID` environment variable
+  - `acido -sh` automatically downloads input when environment variable is detected
+  - Eliminates the need for chained commands like `acido -d <uuid> && acido -sh '<command>'`
+  - Commands are now cleaner: just `acido -sh '<command>'`
+  - Reduces overhead and improves code maintainability
+- **Version Management**: Updated from 0.43.0 to 0.44.0
+
+### Technical Details
+- Modified `InstanceManager.deploy()` to set `ACIDO_INPUT_UUID` environment variable
+- Modified `Acido.save_output()` to auto-download input when environment variable is present
+- Backward compatible: `-d` flag still works when called manually
+
 ## [0.42.0] - 2025-01-03
 
 ### Added
@@ -67,5 +83,6 @@ acido follows [Semantic Versioning](https://semver.org/):
    - Creates GitHub release with artifacts
    - Publishes to PyPI
 
+[0.44.0]: https://github.com/merabytes/acido/releases/tag/v0.44.0
 [0.42.0]: https://github.com/merabytes/acido/releases/tag/v0.42.0
 [0.41.1]: https://github.com/merabytes/acido/releases/tag/v0.41.1
