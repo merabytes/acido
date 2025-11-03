@@ -1098,7 +1098,7 @@ class Acido(object):
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers
 {pkg_install}
 # Install acido (psutil will build from source)
-RUN python3 -m pip install --break-system-packages acido
+RUN python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
@@ -1129,9 +1129,6 @@ ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
         else:  # Debian/Ubuntu-based
-            # Check if we need --break-system-packages flag
-            pip_flags = ' --break-system-packages' if distro_info.get('needs_break_packages', False) else ''
-            
             # Build apt-get install command if packages are specified
             pkg_install = ''
             if validated_packages:
@@ -1146,7 +1143,7 @@ CMD ["sleep", "infinity"]
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 {pkg_install}
 # Install acido (psutil will build from source)
-RUN python3 -m pip install{pip_flags} acido
+RUN python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
