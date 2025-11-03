@@ -38,7 +38,7 @@ def _handle_healthcheck():
     return build_response(200, {
         'status': 'healthy',
         'message': 'Lambda function is running',
-        'version': '0.41'
+        'version': '0.41.1'
     }, CORS_HEADERS)
 
 
