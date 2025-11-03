@@ -57,23 +57,52 @@ def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_fil
     )
 
 
+def _execute_run(acido, name, image_name, task, duration, cleanup):
+    """Execute run operation (single ephemeral instance) and return response and outputs."""
+    full_image_url = acido.build_image_url(image_name)
+    
+    return acido.run(
+        name=name,
+        image_name=full_image_url,
+        task=task,
+        duration=duration,
+        write_to_file=None,
+        output_format='json',
+        quiet=True,
+        cleanup=cleanup
+    )
+
+
 def lambda_handler(event, context):
     """
-    AWS Lambda handler for acido distributed scanning.
+    AWS Lambda handler for acido distributed scanning and ephemeral runners.
     
-    Expected event format:
+    Supports two operations:
+    
+    1. Fleet operation (default) - Multiple container instances for distributed scanning:
     {
+        "operation": "fleet",  // optional, default is fleet
         "image": "kali-rolling",
         "targets": ["merabytes.com", "uber.com", "facebook.com"],
         "task": "nmap -iL input -p 0-1000"
     }
     
+    2. Run operation - Single ephemeral instance with auto-cleanup (e.g., for GitHub runners):
+    {
+        "operation": "run",
+        "name": "github-runner-01",
+        "image": "github-runner",
+        "task": "./run.sh",
+        "duration": 900,  // optional, default 900s (15min)
+        "cleanup": true   // optional, default true
+    }
+    
     Or with body wrapper:
     {
         "body": {
-            "image": "kali-rolling",
-            "targets": ["merabytes.com", "uber.com", "facebook.com"],
-            "task": "nmap -iL input -p 0-1000"
+            "operation": "run",
+            "name": "github-runner-01",
+            ...
         }
     }
     
@@ -91,7 +120,7 @@ def lambda_handler(event, context):
     - MANAGED_IDENTITY_CLIENT_ID (optional, user-assigned managed identity client ID)
     
     Returns:
-        dict: Response with statusCode and body containing fleet outputs
+        dict: Response with statusCode and body containing outputs
     """
     # Parse event
     event = parse_lambda_event(event)
@@ -99,55 +128,98 @@ def lambda_handler(event, context):
     # Validate event body exists
     if not event:
         return build_error_response(
-            'Missing event body. Expected fields: image, targets, task'
+            'Missing event body'
         )
     
-    # Validate required fields
-    required_fields = ['image', 'targets', 'task']
-    is_valid, missing_fields = validate_required_fields(event, required_fields)
+    # Determine operation type (default to 'fleet' for backward compatibility)
+    operation = event.get('operation', 'fleet')
     
-    if not is_valid:
+    if operation not in ['fleet', 'run']:
         return build_error_response(
-            f'Missing required fields: {", ".join(missing_fields)}'
+            f'Invalid operation: {operation}. Must be "fleet" or "run"'
         )
     
-    # Extract parameters
-    image_name = event.get('image')
-    targets = event.get('targets', [])
-    task = event.get('task')
-    fleet_name = event.get('fleet_name', 'lambda-fleet')
-    num_instances = event.get('num_instances', len(targets) if targets else 1)
-    
-    # Validate targets
-    if not _validate_targets(targets):
-        return build_error_response('targets must be a non-empty list')
-    
+    # Validate and execute based on operation type
     try:
-        # Create temporary input file with targets
-        input_file = _create_input_file(targets)
-        
         # Initialize acido with environment-based configuration
         acido = Acido(check_config=True)
         
-        # Execute fleet operation
-        response, outputs = _execute_fleet(
-            acido, fleet_name, num_instances, image_name, task, input_file
-        )
-        
-        # Clean up temporary input file
-        _cleanup_file(input_file)
-        
-        # Clean up containers if requested
-        if event.get('rm_when_done', True):
-            acido.rm(fleet_name if num_instances <= 10 else f'{fleet_name}*')
-        
-        # Return successful response
-        return build_response(200, {
-            'fleet_name': fleet_name,
-            'instances': num_instances,
-            'image': image_name,
-            'outputs': outputs
-        })
+        if operation == 'run':
+            # Run operation: single ephemeral instance
+            required_fields = ['image', 'name', 'task']
+            is_valid, missing_fields = validate_required_fields(event, required_fields)
+            
+            if not is_valid:
+                return build_error_response(
+                    f'Missing required fields for run operation: {", ".join(missing_fields)}'
+                )
+            
+            # Extract parameters for run operation
+            name = event.get('name')
+            image_name = event.get('image')
+            task = event.get('task')
+            duration = event.get('duration', 900)  # Default 15 minutes
+            cleanup = event.get('cleanup', True)  # Default to auto-cleanup
+            
+            # Execute run operation
+            response, outputs = _execute_run(
+                acido, name, image_name, task, duration, cleanup
+            )
+            
+            # Return successful response
+            return build_response(200, {
+                'operation': 'run',
+                'name': name,
+                'image': image_name,
+                'duration': duration,
+                'cleanup': cleanup,
+                'outputs': outputs
+            })
+            
+        else:  # operation == 'fleet'
+            # Fleet operation: multiple instances for distributed scanning
+            required_fields = ['image', 'targets', 'task']
+            is_valid, missing_fields = validate_required_fields(event, required_fields)
+            
+            if not is_valid:
+                return build_error_response(
+                    f'Missing required fields for fleet operation: {", ".join(missing_fields)}'
+                )
+            
+            # Extract parameters for fleet operation
+            image_name = event.get('image')
+            targets = event.get('targets', [])
+            task = event.get('task')
+            fleet_name = event.get('fleet_name', 'lambda-fleet')
+            num_instances = event.get('num_instances', len(targets) if targets else 1)
+            
+            # Validate targets
+            if not _validate_targets(targets):
+                return build_error_response('targets must be a non-empty list')
+            
+            # Create temporary input file with targets
+            input_file = _create_input_file(targets)
+            
+            # Execute fleet operation
+            response, outputs = _execute_fleet(
+                acido, fleet_name, num_instances, image_name, task, input_file
+            )
+            
+            # Clean up temporary input file
+            _cleanup_file(input_file)
+            
+            # Clean up containers if requested
+            if event.get('rm_when_done', True):
+                acido.rm(fleet_name if num_instances <= 10 else f'{fleet_name}*')
+            
+            # Return successful response
+            return build_response(200, {
+                'operation': 'fleet',
+                'fleet_name': fleet_name,
+                'instances': num_instances,
+                'image': image_name,
+                'outputs': outputs
+            })
         
     except Exception as e:
         # Return error response

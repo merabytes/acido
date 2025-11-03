@@ -69,7 +69,22 @@ aws lambda update-function-code \
 
 ### Event Format
 
-The Lambda function accepts JSON events with the following structure:
+The Lambda function now supports two operations:
+
+#### 1. Fleet Operation (Default - Distributed Scanning)
+
+For multiple container instances running distributed scans:
+
+```json
+{
+  "operation": "fleet",
+  "image": "kali-rolling",
+  "targets": ["merabytes.com", "uber.com", "facebook.com"],
+  "task": "nmap -iL input -p 0-1000"
+}
+```
+
+Or without explicit operation field (defaults to fleet):
 
 ```json
 {
@@ -79,20 +94,40 @@ The Lambda function accepts JSON events with the following structure:
 }
 ```
 
+#### 2. Run Operation (Ephemeral Single Instance)
+
+For single ephemeral instances with auto-cleanup (e.g., GitHub runners):
+
+```json
+{
+  "operation": "run",
+  "name": "github-runner-01",
+  "image": "github-runner",
+  "task": "./run.sh --url https://github.com/myorg/myrepo --token ${RUNNER_TOKEN}",
+  "duration": 900,
+  "cleanup": true
+}
+```
+
 Or with a body wrapper (e.g., from API Gateway):
 
 ```json
 {
   "body": {
-    "image": "kali-rolling",
-    "targets": ["merabytes.com", "uber.com", "facebook.com"],
-    "task": "nmap -iL input -p 0-1000"
+    "operation": "run",
+    "name": "github-runner-01",
+    "image": "github-runner",
+    "task": "./run.sh",
+    "duration": 900
   }
 }
 ```
 
 ### Parameters
 
+#### Fleet Operation Parameters
+
+- **operation** (optional): Set to "fleet" or omit (default: "fleet")
 - **image** (required): Name of the Docker image to use (e.g., "kali-rolling", "nuclei")
 - **targets** (required): Array of target URLs/IPs to scan
 - **task** (required): Command to execute (use "input" as the filename placeholder)
@@ -100,13 +135,23 @@ Or with a body wrapper (e.g., from API Gateway):
 - **num_instances** (optional): Number of container instances (default: number of targets)
 - **rm_when_done** (optional): Clean up containers after completion (default: true)
 
+#### Run Operation Parameters
+
+- **operation** (required): Set to "run"
+- **name** (required): Container instance name
+- **image** (required): Name of the Docker image to use (e.g., "github-runner")
+- **task** (required): Command to execute
+- **duration** (optional): Duration in seconds before auto-cleanup (default: 900, max: 900)
+- **cleanup** (optional): Whether to auto-cleanup after duration (default: true)
+
 ### Response Format
 
-Success response (200):
+Success response for fleet operation (200):
 ```json
 {
   "statusCode": 200,
   "body": {
+    "operation": "fleet",
     "fleet_name": "lambda-fleet",
     "instances": 3,
     "image": "kali-rolling",
@@ -114,6 +159,23 @@ Success response (200):
       "container-1": "scan output...",
       "container-2": "scan output...",
       "container-3": "scan output..."
+    }
+  }
+}
+```
+
+Success response for run operation (200):
+```json
+{
+  "statusCode": 200,
+  "body": {
+    "operation": "run",
+    "name": "github-runner-01",
+    "image": "github-runner",
+    "duration": 900,
+    "cleanup": true,
+    "outputs": {
+      "github-runner-01-01": "runner output..."
     }
   }
 }

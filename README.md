@@ -30,6 +30,7 @@ Whether you’re building a secure secret-sharing system, a distributor of short
 - [CLI Reference](#cli-reference)
 - [Examples](#examples)
 - [AWS Lambda Support](#aws-lambda-support)
+- [GitHub Self-Hosted Runners](#github-self-hosted-runners)
 - [Secrets Sharing Service](#secrets-sharing-service)
 - [Credits](#credits)
 
@@ -215,6 +216,9 @@ acido configure
 
 # Deploy a fleet of containers
 acido fleet <fleet-name> [options]
+
+# Run a single ephemeral container with auto-cleanup
+acido run <name> [options]
 
 # List all container instances
 acido ls
@@ -423,6 +427,42 @@ Acido can be deployed as an AWS Lambda function, enabling serverless security sc
 - See [LAMBDA.md](LAMBDA.md) for complete deployment and usage instructions
 - Example payload: [examples/example_lambda_payload.json](examples/example_lambda_payload.json)
 - Automatic deployment workflow: [.github/workflows/deploy-lambda.yml](.github/workflows/deploy-lambda.yml)
+
+## GitHub Self-Hosted Runners
+
+Acido supports spinning up ephemeral GitHub self-hosted runner containers on Azure Container Instances.
+
+**Key Features:**
+- Single ephemeral container instances with auto-cleanup
+- Configurable duration (up to 15 minutes for Lambda compatibility)
+- Ideal for on-demand CI/CD workers
+- Cost-effective: pay only for runtime
+- AWS Lambda orchestration support
+
+**Quick Example:**
+
+Run a GitHub runner for 15 minutes via CLI:
+```bash
+acido run github-runner-01 \
+  -im github-runner \
+  -t './run.sh --url https://github.com/myorg/myrepo --token TOKEN' \
+  -d 900
+```
+
+Or via AWS Lambda:
+```json
+{
+  "operation": "run",
+  "name": "github-runner-01",
+  "image": "github-runner",
+  "task": "./run.sh --url https://github.com/myorg/myrepo --token ${RUNNER_TOKEN}",
+  "duration": 900
+}
+```
+
+**Documentation:**
+- See [GITHUB_RUNNERS.md](GITHUB_RUNNERS.md) for complete setup and usage instructions
+- Example payload: [examples/example_lambda_github_runner_payload.json](examples/example_lambda_github_runner_payload.json)
 
 ## Secrets Sharing Service
 
