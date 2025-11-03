@@ -120,7 +120,7 @@ class TestLambdaIntegration(unittest.TestCase):
             event = {
                 'image': 'kali-rolling',
                 'targets': ['merabytes.com', 'uber.com'],
-                'task': 'nmap -iL input -p 0-1000',
+                'task': '/usr/local/bin/nmap -iL input -p 0-1000',
                 'num_instances': 2
             }
             context = {}
