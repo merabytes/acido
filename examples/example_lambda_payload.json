@@ -4,5 +4,5 @@
     "merabytes.com",
     "uber.com"
   ],
-  "task": "nmap -iL input -p 80"
+  "task": "/usr/local/bin/nmap -iL input -p 80"
 }
