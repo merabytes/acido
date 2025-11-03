@@ -29,6 +29,7 @@ Whether you’re building a secure secret-sharing system, a distributor of short
 - [Quick Start](#quick-start)
 - [CLI Reference](#cli-reference)
 - [Examples](#examples)
+- [Docker Usage](#docker-usage)
 - [AWS Lambda Support](#aws-lambda-support)
 - [GitHub Self-Hosted Runners](#github-self-hosted-runners)
 - [Secrets Sharing Service](#secrets-sharing-service)
@@ -464,6 +465,49 @@ acido ip rm pentest-ip
 ```
 
 **Note:** The old syntax (`acido --create-ip <name>` and `acido --ip`) is still supported for backward compatibility.
+
+## Docker Usage
+
+Acido can be run in a Docker container for isolated and reproducible environments.
+
+**Quick Start:**
+
+Build the Docker image from the latest version:
+```bash
+./build.sh
+```
+
+Or from a specific branch/tag:
+```bash
+./build.sh v0.44.0
+./build.sh feature-branch
+```
+
+**Run acido commands:**
+```bash
+# Show help
+docker run --rm acido-cli:main --help
+
+# Run with Azure credentials
+docker run --rm \
+  -e AZURE_RESOURCE_GROUP=your-rg \
+  -e IMAGE_REGISTRY_SERVER=your-registry.azurecr.io \
+  -e IMAGE_REGISTRY_USERNAME=your-username \
+  -e IMAGE_REGISTRY_PASSWORD=your-password \
+  -e STORAGE_ACCOUNT_NAME=your-storage \
+  acido-cli:main ls
+```
+
+**Key Features:**
+- Pre-built Docker image with acido CLI
+- Isolated environment for testing
+- Easy distribution and deployment
+- Automated build script (`build.sh`)
+- CI/CD tested in GitHub Actions
+
+**Documentation:**
+- See [DOCKER.md](DOCKER.md) for complete Docker usage guide
+- Includes examples for mounting files and environment variables
 
 ## AWS Lambda Support
 
