@@ -87,12 +87,13 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertIn('FROM ubuntu:20.04', dockerfile)
         self.assertIn('# Install custom packages', dockerfile)
         self.assertIn('apt-get update && apt-get install -y nmap masscan', dockerfile)
-        self.assertIn('pip install --break-system-packages acido', dockerfile)
+        self.assertIn('pip install --upgrade pip', dockerfile)
+        self.assertIn('pip install acido', dockerfile)
         
         # Verify installation order: Python deps, then custom packages, then acido
         python_idx = dockerfile.find('python3-pip build-essential')
         custom_idx = dockerfile.find('# Install custom packages')
-        acido_idx = dockerfile.find('pip install --break-system-packages acido')
+        acido_idx = dockerfile.find('pip install acido')
         
         self.assertLess(python_idx, custom_idx)
         self.assertLess(custom_idx, acido_idx)
@@ -113,7 +114,8 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertIn('FROM alpine:3.14', dockerfile)
         self.assertIn('# Install custom packages', dockerfile)
         self.assertIn('apk update && apk add --no-cache nmap masscan', dockerfile)
-        self.assertIn('pip install --break-system-packages acido', dockerfile)
+        self.assertIn('pip install --upgrade pip', dockerfile)
+        self.assertIn('pip install acido', dockerfile)
 
     def test_generate_dockerfile_kali_auto_install(self):
         """Test automatic kali-linux-large installation for kali-rolling images."""
@@ -161,7 +163,8 @@ class TestCreateWithPackages(unittest.TestCase):
         
         # Check that no custom package installation is present
         self.assertNotIn('# Install custom packages', dockerfile)
-        self.assertIn('pip install --break-system-packages acido', dockerfile)
+        self.assertIn('pip install --upgrade pip', dockerfile)
+        self.assertIn('pip install acido', dockerfile)
 
     def test_generate_dockerfile_invalid_packages_filtered(self):
         """Test that invalid package names are filtered out."""
@@ -250,6 +253,89 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertNotIn('apk update && apk add --no-cache nmap', dockerfile)
         # But should have apk add without update
         self.assertIn('apk add --no-cache nmap', dockerfile)
+
+    def test_generate_dockerfile_with_root_flag_alpine(self):
+        """Test Dockerfile generation with --root flag for Alpine."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'alpine/nikto:latest'
+        distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
+        packages = ['python3']
+        
+        # Test with run_as_root=True
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=True)
+        
+        # Check that USER root directive is present
+        self.assertIn('USER root', dockerfile)
+        # Verify it comes after FROM
+        from_idx = dockerfile.find('FROM')
+        user_idx = dockerfile.find('USER root')
+        self.assertLess(from_idx, user_idx)
+        # And before RUN commands
+        run_idx = dockerfile.find('RUN')
+        self.assertLess(user_idx, run_idx)
+
+    def test_generate_dockerfile_without_root_flag_alpine(self):
+        """Test Dockerfile generation without --root flag for Alpine."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'alpine/nikto:latest'
+        distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
+        packages = ['python3']
+        
+        # Test with run_as_root=False (default)
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=False)
+        
+        # Check that USER root directive is NOT present
+        self.assertNotIn('USER root', dockerfile)
+
+    def test_generate_dockerfile_with_root_flag_debian(self):
+        """Test Dockerfile generation with --root flag for Debian."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'ubuntu:20.04'
+        distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
+        packages = ['nmap']
+        
+        # Test with run_as_root=True
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=True)
+        
+        # Check that USER root directive is present
+        self.assertIn('USER root', dockerfile)
+        # Verify proper ordering
+        from_idx = dockerfile.find('FROM')
+        user_idx = dockerfile.find('USER root')
+        run_idx = dockerfile.find('RUN')
+        self.assertLess(from_idx, user_idx)
+        self.assertLess(user_idx, run_idx)
+
+    def test_generate_dockerfile_with_root_flag_rhel(self):
+        """Test Dockerfile generation with --root flag for RHEL."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'centos:7'
+        distro_info = {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum', 'needs_break_packages': False}
+        packages = ['nmap']
+        
+        # Test with run_as_root=True
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=True)
+        
+        # Check that USER root directive is present
+        self.assertIn('USER root', dockerfile)
+        # Verify proper ordering
+        from_idx = dockerfile.find('FROM')
+        user_idx = dockerfile.find('USER root')
+        run_idx = dockerfile.find('RUN')
+        self.assertLess(from_idx, user_idx)
+        self.assertLess(user_idx, run_idx)
 
 
 if __name__ == '__main__':

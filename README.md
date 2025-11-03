@@ -157,6 +157,12 @@ acido create nmap
 # Or specify the full Docker image URL
 acido create nuclei --image projectdiscovery/nuclei:latest
 
+# For images that run as non-root user (e.g., alpine/nikto)
+acido create nikto --image alpine/nikto:latest --root
+
+# Install additional packages during image creation
+acido create nikto --image alpine/nikto:latest --root --install python3 --install nmap
+
 # Or build from a GitHub repository (must contain a Dockerfile)
 acido create git+https://github.com/user/custom-scanner
 
@@ -206,7 +212,7 @@ Acido now supports Docker-like subcommands for a more intuitive experience:
 
 ```bash
 # Create acido-compatible image from base Docker image
-acido create <name> [--image <full-image-url>]
+acido create <name> [--image <full-image-url>] [--root] [--install <package>] [--no-update]
 
 # Create acido-compatible image from GitHub repository (must contain Dockerfile)
 acido create git+https://github.com/user/repo[@ref]
@@ -231,6 +237,31 @@ acido select <pattern>
 
 # Execute command on selected instances  
 acido exec <command> [options]
+```
+
+### Create Command Options
+
+```bash
+acido create <name> [options]
+
+Options:
+  --image IMAGE_URL        Full Docker image URL (e.g., 'projectdiscovery/nuclei:latest')
+  --install PACKAGE        Install additional package (can be used multiple times)
+  --no-update             Skip package list update before installing packages
+  --root                  Run as root user (for images that default to non-root)
+
+Examples:
+  # Create from base image
+  acido create nmap --image nmap:latest
+  
+  # Create with root privileges (for non-root images like alpine/nikto)
+  acido create nikto --image alpine/nikto:latest --root
+  
+  # Install additional packages
+  acido create custom --image alpine:latest --root --install python3 --install nmap
+  
+  # Build from GitHub repository
+  acido create git+https://github.com/user/repo@main
 ```
 
 ### Fleet Command Options

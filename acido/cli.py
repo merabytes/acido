@@ -40,6 +40,7 @@ create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", 
 create_parser.add_argument('--image', dest='base_image_url', help='Full Docker image URL to use as base (e.g., "projectdiscovery/nuclei:latest") or GitHub URL')
 create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan). Only works with base images, not GitHub URLs.')
 create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
+create_parser.add_argument('--root', dest='run_as_root', action='store_true', help='Run package installation commands as root user (useful for images that run as non-root by default)')
 
 # Configure subcommand (alias for -c/--config)
 configure_parser = subparsers.add_parser('configure', help='Configure acido (alias for -c/--config)')
@@ -189,6 +190,10 @@ parser.add_argument("--install",
 parser.add_argument("--no-update",
                     dest="no_update",
                     help="Skip package list update before installing packages",
+                    action='store_true')
+parser.add_argument("--root",
+                    dest="run_as_root",
+                    help="Run package installation commands as root user (useful for images that run as non-root by default)",
                     action='store_true')
 
 
@@ -1207,7 +1212,7 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
-    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False) -> str:
+    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False) -> str:
         """Generate Dockerfile content based on distro and install custom packages."""
         
         # Validate all package names to prevent command injection
@@ -1224,6 +1229,10 @@ class Acido(object):
             if 'kali-linux-large' not in validated_packages:
                 validated_packages.insert(0, 'kali-linux-large')
         
+        # Add USER root directive if run_as_root is enabled
+        # This is needed for images that run as non-root by default (e.g., alpine/nikto)
+        user_root_directive = '\n# Switch to root user for package installation\nUSER root\n' if run_as_root else ''
+        
         if distro_info['type'] == 'alpine':
             # Build apk install command if packages are specified
             pkg_install = ''
@@ -1234,12 +1243,12 @@ class Acido(object):
                 pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apk add --no-cache {pkg_list}\n'
             
             return f"""FROM {base_image}
-
+{user_root_directive}
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers
 {pkg_install}
-# Install acido (psutil will build from source)
-RUN python3 -m pip install --break-system-packages acido
+# Upgrade pip and install acido (psutil will build from source)
+RUN python3 -m pip install --upgrade pip && python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
@@ -1259,20 +1268,17 @@ CMD ["sleep", "infinity"]
                 pkg_install = f'\n# Install custom packages\nRUN {pkg_manager} install -y {pkg_list} && {pkg_manager} clean all\n'
             
             return f"""FROM {base_image}
-
+{user_root_directive}
 # Install Python and build dependencies required for psutil and other native extensions
 RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all
 {pkg_install}
-# Install acido (psutil will build from source)
-RUN python3 -m pip install acido
+# Upgrade pip and install acido (psutil will build from source)
+RUN python3 -m pip install --upgrade pip && python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
         else:  # Debian/Ubuntu-based
-            # Check if we need --break-system-packages flag
-            pip_flags = ' --break-system-packages' if distro_info.get('needs_break_packages', False) else ''
-            
             # Build apt-get install command if packages are specified
             pkg_install = ''
             if validated_packages:
@@ -1282,12 +1288,12 @@ CMD ["sleep", "infinity"]
                 pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apt-get install -y {pkg_list} && rm -rf /var/lib/apt/lists/*\n'
             
             return f"""FROM {base_image}
-
+{user_root_directive}
 # Install Python and build dependencies required for psutil and other native extensions
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/*
 {pkg_install}
-# Install acido (psutil will build from source)
-RUN python3 -m pip install{pip_flags} acido
+# Upgrade pip and install acido (psutil will build from source)
+RUN python3 -m pip install --upgrade pip && python3 -m pip install acido
 
 ENTRYPOINT []
 CMD ["sleep", "infinity"]
@@ -1499,7 +1505,7 @@ CMD ["sleep", "infinity"]
             
             return new_image_name
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False):
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False):
         """
         Create an acido-compatible Docker image from a base image or GitHub repository.
         
@@ -1508,6 +1514,7 @@ CMD ["sleep", "infinity"]
             quiet: Suppress verbose output and show progress bar
             install_packages: List of packages to install (e.g., ['nmap', 'masscan']) - only applicable for base images, not GitHub URLs
             no_update: Skip package list update before installing packages - only applicable for base images
+            run_as_root: Run package installation commands as root user (useful for images that run as non-root by default)
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1517,6 +1524,9 @@ CMD ["sleep", "infinity"]
             if install_packages:
                 if not quiet:
                     print(orange('Warning: --install option is ignored when building from GitHub URL'))
+            if run_as_root:
+                if not quiet:
+                    print(orange('Warning: --root option is ignored when building from GitHub URL'))
             return self.create_acido_image_from_github(base_image, quiet=quiet)
         
         # Validate Docker is available
@@ -1554,7 +1564,7 @@ CMD ["sleep", "infinity"]
             pbar.set_description("Generating Dockerfile")
         
         # Generate Dockerfile content
-        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update)
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root)
         
         # Create temporary directory and Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1750,7 +1760,8 @@ def main():
     if args.create_image:
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)
-        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update)
+        run_as_root = getattr(args, 'run_as_root', False)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root)
 
 if __name__ == "__main__":
     main()
