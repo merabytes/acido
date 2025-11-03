@@ -7,12 +7,12 @@
 [![Twitter Follow](https://img.shields.io/twitter/follow/merabytes?style=social)](https://twitter.com/merabytes)
 
 
-> **The open-source engine powering [Secrets by Merabytes](https://secrets.merabytes.com)**  
+> **The open-source engine powering [Secrets by Merabytes™](https://secrets.merabytes.com)**  
 > Disrupting how secrets, tokens, and one-time credentials are shared — forever.
 
 acido isn’t just another CLI tool. It’s the backbone of an infrastructure-first rethink of how secrets, tokens and one-time credentials are built, deployed and consumed.
 
-Already powering Secrets by Merabytes — the first truly open-source secret-sharing app — acido installs like a developer tool and scales like an enterprise service.
+Already powering Secrets by Merabytes™ — the first truly open-source secret-sharing app — acido installs like a developer tool and scales like an enterprise service.
 
 Deploy fleets of workloads on Azure Container Instances in minutes.
 
