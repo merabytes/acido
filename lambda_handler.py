@@ -139,6 +139,29 @@ def lambda_handler(event, context):
             f'Invalid operation: {operation}. Must be "fleet" or "run"'
         )
     
+    # Validate required fields based on operation type before initializing Acido
+    if operation == 'run':
+        required_fields = ['image', 'name', 'task']
+        is_valid, missing_fields = validate_required_fields(event, required_fields)
+        
+        if not is_valid:
+            return build_error_response(
+                f'Missing required fields for run operation: {", ".join(missing_fields)}'
+            )
+    else:  # operation == 'fleet'
+        required_fields = ['image', 'targets', 'task']
+        is_valid, missing_fields = validate_required_fields(event, required_fields)
+        
+        if not is_valid:
+            return build_error_response(
+                f'Missing required fields for fleet operation: {", ".join(missing_fields)}'
+            )
+        
+        # Validate targets for fleet operation
+        targets = event.get('targets', [])
+        if not _validate_targets(targets):
+            return build_error_response('targets must be a non-empty list')
+    
     # Validate and execute based on operation type
     try:
         # Initialize acido with environment-based configuration
@@ -146,14 +169,6 @@ def lambda_handler(event, context):
         
         if operation == 'run':
             # Run operation: single ephemeral instance
-            required_fields = ['image', 'name', 'task']
-            is_valid, missing_fields = validate_required_fields(event, required_fields)
-            
-            if not is_valid:
-                return build_error_response(
-                    f'Missing required fields for run operation: {", ".join(missing_fields)}'
-                )
-            
             # Extract parameters for run operation
             name = event.get('name')
             image_name = event.get('image')
@@ -178,24 +193,12 @@ def lambda_handler(event, context):
             
         else:  # operation == 'fleet'
             # Fleet operation: multiple instances for distributed scanning
-            required_fields = ['image', 'targets', 'task']
-            is_valid, missing_fields = validate_required_fields(event, required_fields)
-            
-            if not is_valid:
-                return build_error_response(
-                    f'Missing required fields for fleet operation: {", ".join(missing_fields)}'
-                )
-            
             # Extract parameters for fleet operation
             image_name = event.get('image')
             targets = event.get('targets', [])
             task = event.get('task')
             fleet_name = event.get('fleet_name', 'lambda-fleet')
             num_instances = event.get('num_instances', len(targets) if targets else 1)
-            
-            # Validate targets
-            if not _validate_targets(targets):
-                return build_error_response('targets must be a non-empty list')
             
             # Create temporary input file with targets
             input_file = _create_input_file(targets)
