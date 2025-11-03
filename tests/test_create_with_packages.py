@@ -251,6 +251,89 @@ class TestCreateWithPackages(unittest.TestCase):
         # But should have apk add without update
         self.assertIn('apk add --no-cache nmap', dockerfile)
 
+    def test_generate_dockerfile_with_root_flag_alpine(self):
+        """Test Dockerfile generation with --root flag for Alpine."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'alpine/nikto:latest'
+        distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
+        packages = ['python3']
+        
+        # Test with run_as_root=True
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=True)
+        
+        # Check that USER root directive is present
+        self.assertIn('USER root', dockerfile)
+        # Verify it comes after FROM
+        from_idx = dockerfile.find('FROM')
+        user_idx = dockerfile.find('USER root')
+        self.assertLess(from_idx, user_idx)
+        # And before RUN commands
+        run_idx = dockerfile.find('RUN')
+        self.assertLess(user_idx, run_idx)
+
+    def test_generate_dockerfile_without_root_flag_alpine(self):
+        """Test Dockerfile generation without --root flag for Alpine."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'alpine/nikto:latest'
+        distro_info = {'type': 'alpine', 'python_pkg': 'python3', 'pkg_manager': 'apk', 'needs_break_packages': False}
+        packages = ['python3']
+        
+        # Test with run_as_root=False (default)
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=False)
+        
+        # Check that USER root directive is NOT present
+        self.assertNotIn('USER root', dockerfile)
+
+    def test_generate_dockerfile_with_root_flag_debian(self):
+        """Test Dockerfile generation with --root flag for Debian."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'ubuntu:20.04'
+        distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
+        packages = ['nmap']
+        
+        # Test with run_as_root=True
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=True)
+        
+        # Check that USER root directive is present
+        self.assertIn('USER root', dockerfile)
+        # Verify proper ordering
+        from_idx = dockerfile.find('FROM')
+        user_idx = dockerfile.find('USER root')
+        run_idx = dockerfile.find('RUN')
+        self.assertLess(from_idx, user_idx)
+        self.assertLess(user_idx, run_idx)
+
+    def test_generate_dockerfile_with_root_flag_rhel(self):
+        """Test Dockerfile generation with --root flag for RHEL."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'centos:7'
+        distro_info = {'type': 'rhel', 'python_pkg': 'python3', 'pkg_manager': 'yum', 'needs_break_packages': False}
+        packages = ['nmap']
+        
+        # Test with run_as_root=True
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, packages, no_update=False, run_as_root=True)
+        
+        # Check that USER root directive is present
+        self.assertIn('USER root', dockerfile)
+        # Verify proper ordering
+        from_idx = dockerfile.find('FROM')
+        user_idx = dockerfile.find('USER root')
+        run_idx = dockerfile.find('RUN')
+        self.assertLess(from_idx, user_idx)
+        self.assertLess(user_idx, run_idx)
+
 
 if __name__ == '__main__':
     unittest.main()
