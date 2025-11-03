@@ -80,6 +80,24 @@ ls_parser = subparsers.add_parser('ls', help='List all container instances')
 rm_parser = subparsers.add_parser('rm', help='Remove container instances')
 rm_parser.add_argument('name', help='Container group name or pattern to remove')
 
+# IP subcommand with sub-subparsers for create/ls/rm
+ip_parser = subparsers.add_parser('ip', help='Manage IPv4 addresses and network profiles')
+ip_subparsers = ip_parser.add_subparsers(dest='ip_subcommand', help='IP management commands')
+
+# IP create subcommand
+ip_create_parser = ip_subparsers.add_parser('create', help='Create a new IPv4 address and network profile')
+ip_create_parser.add_argument('name', help='Name for the IPv4 address and network profile')
+
+# IP ls subcommand
+ip_ls_parser = ip_subparsers.add_parser('ls', help='List all IPv4 addresses')
+
+# IP rm subcommand
+ip_rm_parser = ip_subparsers.add_parser('rm', help='Remove IPv4 address and network profile')
+ip_rm_parser.add_argument('name', help='Name of the IPv4 address and network profile to remove')
+
+# IP select subcommand
+ip_select_parser = ip_subparsers.add_parser('select', help='Select an IPv4 address to use for containers')
+
 # Select subcommand
 select_parser = subparsers.add_parser('select', help='Select instances by name/regex')
 select_parser.add_argument('pattern', help='Name or regex pattern to select')
@@ -256,6 +274,18 @@ if args.subcommand == 'select':
 if args.subcommand == 'exec':
     if not hasattr(args, 'exec_cmd') or not args.exec_cmd:
         args.exec_cmd = args.command
+
+# Handle 'ip' subcommand
+if args.subcommand == 'ip':
+    if hasattr(args, 'ip_subcommand') and args.ip_subcommand:
+        if args.ip_subcommand == 'create':
+            args.create_ip = args.name
+        elif args.ip_subcommand == 'ls':
+            args.list_ip = True
+        elif args.ip_subcommand == 'rm':
+            args.remove_ip = args.name
+        elif args.ip_subcommand == 'select':
+            args.ipv4_address = True
 
 instances_outputs = {}
 
@@ -483,6 +513,46 @@ class Acido(object):
         self._save_config()
         
         print(good(f"You selected IP address: {selected_ip_address} from network profile {self.network_profile}"))
+
+    def ls_ip(self, interactive=True):
+        """List all IPv4 addresses and network profiles."""
+        if self.network_manager is None:
+            print(bad("Network manager is not initialized. Please provide a resource group."))
+            return None if interactive else []
+        
+        ip_addresses_info = self.network_manager.list_ipv4()
+        
+        if interactive:
+            if not ip_addresses_info:
+                print(info("No IPv4 addresses found."))
+            else:
+                print(good("IPv4 addresses:"))
+                for info in ip_addresses_info:
+                    ip_addr = info['ip_address'] if info['ip_address'] else 'Pending'
+                    print(f"  {bold(info['name'])}: {green(ip_addr)}")
+        
+        return None if interactive else ip_addresses_info
+
+    def rm_ip(self, name):
+        """Remove IPv4 address and associated network resources."""
+        if self.network_manager is None:
+            print(bad("Network manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            # Delete network profile, subnet, vnet, and public IP
+            self.network_manager.delete_resources(name)
+            
+            # Clear network_profile in config if it matches the deleted one
+            if self.network_profile and name in str(self.network_profile.get('id', '')):
+                self.network_profile = None
+                self._save_config()
+            
+            print(good(f"Successfully removed IPv4 address and network resources: {name}"))
+            return True
+        except Exception as e:
+            print(bad(f"Failed to remove IPv4 address {name}: {str(e)}"))
+            return False
 
     def ls(self, interactive=True):
         all_instances = {}
@@ -1947,6 +2017,10 @@ def main():
         )
     if args.remove:
         acido.rm(args.remove)
+    if hasattr(args, 'list_ip') and args.list_ip:
+        acido.ls_ip(interactive=True)
+    if hasattr(args, 'remove_ip') and args.remove_ip:
+        acido.rm_ip(args.remove_ip)
     if args.create_image:
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)
