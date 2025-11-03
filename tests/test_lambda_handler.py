@@ -227,6 +227,71 @@ class TestLambdaHandler(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertEqual(body['fleet_name'], 'custom-fleet')
 
+    @patch('lambda_handler.Acido')
+    def test_ls_operation(self, mock_acido_class):
+        """Test ls operation to list container instances."""
+        # Setup mocks
+        mock_acido = MagicMock()
+        mock_acido_class.return_value = mock_acido
+        mock_acido.ls.return_value = (
+            {'fleet-1': ['container-1', 'container-2']},
+            {'fleet-1': ['container-1', 'container-2']}
+        )
+        
+        event = {
+            'operation': 'ls'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['operation'], 'ls')
+        self.assertIn('instances', body)
+        self.assertEqual(len(body['instances']), 1)
+        self.assertEqual(body['instances'][0]['container_group'], 'fleet-1')
+
+    @patch('lambda_handler.Acido')
+    def test_rm_operation(self, mock_acido_class):
+        """Test rm operation to remove container instances."""
+        # Setup mocks
+        mock_acido = MagicMock()
+        mock_acido_class.return_value = mock_acido
+        mock_acido.rm.return_value = None
+        
+        event = {
+            'operation': 'rm',
+            'name': 'fleet-1'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 200)
+        body = json.loads(response['body'])
+        self.assertEqual(body['operation'], 'rm')
+        self.assertIn('result', body)
+        self.assertEqual(body['result']['removed'], 'fleet-1')
+        
+        # Verify rm was called with correct name
+        mock_acido.rm.assert_called_once_with('fleet-1')
+
+    def test_rm_missing_name(self):
+        """Test rm operation with missing name field."""
+        event = {
+            'operation': 'rm'
+            # Missing name field
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Missing required fields', body['error'])
+
 
 if __name__ == '__main__':
     unittest.main()
