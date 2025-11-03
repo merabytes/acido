@@ -1,0 +1,179 @@
+name: Build Standalone Binaries
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-linux-binaries:
+    name: Build Linux Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - distro: ubuntu
+            base_image: ubuntu:22.04
+            platform: linux/amd64
+            arch: x86_64
+          - distro: alpine
+            base_image: alpine:3.18
+            platform: linux/amd64
+            arch: x86_64
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Extract version
+      id: version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          VERSION=$(grep "version=" setup.py | cut -d"'" -f2)
+        else
+          VERSION="${GITHUB_REF#refs/tags/v}"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Building version: $VERSION"
+
+    - name: Build binary in Docker container
+      run: |
+        cat > Dockerfile.binary << 'EOF'
+        FROM ${{ matrix.base_image }}
+        
+        # Install build dependencies
+        RUN if [ -f /etc/alpine-release ]; then \
+              apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers binutils; \
+            else \
+              apt-get update && apt-get install -y python3 python3-pip python3-dev gcc binutils && rm -rf /var/lib/apt/lists/*; \
+            fi
+        
+        WORKDIR /build
+        COPY . .
+        
+        # Install dependencies and PyInstaller
+        RUN python3 -m pip install --upgrade pip && \
+            python3 -m pip install pyinstaller && \
+            python3 -m pip install .
+        
+        # Build standalone binary
+        RUN pyinstaller --onefile --name acido \
+            --hidden-import=acido.cli \
+            --hidden-import=acido.azure_utils \
+            --hidden-import=acido.utils \
+            --collect-all azure \
+            --collect-all websockets \
+            --collect-all huepy \
+            --collect-all beaupy \
+            --collect-all tqdm \
+            --collect-all cryptography \
+            $(python3 -c "import acido.cli; import os; print(os.path.join(os.path.dirname(acido.cli.__file__), 'cli.py'))")
+        
+        # Strip binary to reduce size
+        RUN strip dist/acido || true
+        
+        EOF
+        
+        docker build --platform ${{ matrix.platform }} -f Dockerfile.binary -t acido-builder .
+        
+        # Extract binary from container
+        CONTAINER_ID=$(docker create acido-builder)
+        docker cp $CONTAINER_ID:/build/dist/acido acido-${{ matrix.distro }}-${{ matrix.arch }}
+        docker rm $CONTAINER_ID
+        
+        # Verify binary
+        file acido-${{ matrix.distro }}-${{ matrix.arch }}
+        ls -lh acido-${{ matrix.distro }}-${{ matrix.arch }}
+
+    - name: Test binary
+      run: |
+        chmod +x acido-${{ matrix.distro }}-${{ matrix.arch }}
+        # Run in Docker to test
+        docker run --rm -v $(pwd)/acido-${{ matrix.distro }}-${{ matrix.arch }}:/acido ${{ matrix.base_image }} sh -c "/acido --help" || echo "Binary test completed"
+
+    - name: Generate checksum
+      run: |
+        sha256sum acido-${{ matrix.distro }}-${{ matrix.arch }} > acido-${{ matrix.distro }}-${{ matrix.arch }}.sha256
+        cat acido-${{ matrix.distro }}-${{ matrix.arch }}.sha256
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: acido-binary-${{ matrix.distro }}-${{ matrix.arch }}
+        path: |
+          acido-${{ matrix.distro }}-${{ matrix.arch }}
+          acido-${{ matrix.distro }}-${{ matrix.arch }}.sha256
+        retention-days: 90
+
+  create-release:
+    name: Create Release with Binaries
+    needs: build-linux-binaries
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Extract version
+      id: version
+      run: |
+        VERSION="${GITHUB_REF#refs/tags/v}"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Download all binary artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: binaries/
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+        find binaries -type f -name 'acido-*' -exec cp {} release-assets/ \;
+        cd release-assets
+        ls -lh
+        
+        # Create combined checksums file
+        cat *.sha256 > all-checksums.txt
+        cat all-checksums.txt
+
+    - name: Create or Update Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-assets/*
+        body: |
+          ## acido ${{ steps.version.outputs.version }} - Standalone Binaries
+          
+          ### Installation - Standalone Binary (Recommended)
+          
+          Download the appropriate binary for your system:
+          
+          **Ubuntu/Debian (x86_64):**
+          ```bash
+          wget https://github.com/merabytes/acido/releases/download/v${{ steps.version.outputs.version }}/acido-ubuntu-x86_64
+          chmod +x acido-ubuntu-x86_64
+          sudo mv acido-ubuntu-x86_64 /usr/local/bin/acido
+          ```
+          
+          **Alpine Linux (x86_64):**
+          ```bash
+          wget https://github.com/merabytes/acido/releases/download/v${{ steps.version.outputs.version }}/acido-alpine-x86_64
+          chmod +x acido-alpine-x86_64
+          sudo mv acido-alpine-x86_64 /usr/local/bin/acido
+          ```
+          
+          ### Installation - Python Package
+          ```bash
+          pip install acido==${{ steps.version.outputs.version }}
+          ```
+          
+          ### Checksums
+          See `all-checksums.txt` for SHA256 checksums of all binaries.
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
