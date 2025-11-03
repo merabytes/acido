@@ -1,0 +1,42 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Python files
+*.py text eol=lf
+*.pyi text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+
+# YAML files
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# JSON files
+*.json text eol=lf
+
+# Dockerfile
+Dockerfile* text eol=lf
+
+# Git config
+.gitattributes text eol=lf
+.gitignore text eol=lf
+
+# Archives
+*.gz binary
+*.tar binary
+*.zip binary
+*.whl binary
+*.egg binary
+
+# Images
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg text eol=lf

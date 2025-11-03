@@ -603,8 +603,8 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertIn('error', body)
         self.assertIn('Decryption failed', body['error'])
-        # Secret and metadata should both be deleted even if decryption fails
-        self.assertEqual(mock_vault_manager.delete_secret.call_count, 2)
+        # Secret and metadata should NOT be deleted on wrong password (allow retry)
+        mock_vault_manager.delete_secret.assert_not_called()
 
     @patch('lambda_handler_secrets.validate_turnstile')
     @patch('lambda_handler_secrets.VaultManager')

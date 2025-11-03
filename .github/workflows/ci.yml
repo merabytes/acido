@@ -60,6 +60,22 @@ jobs:
         python -c "from acido.utils.decoration import __version__; print('acido version:', __version__)"
         python -c "from acido.cli import parser; print('CLI parser loaded successfully')"
 
+    - name: Check version consistency
+      run: |
+        DECORATION_VERSION=$(python -c "from acido.utils.decoration import __version__; print(__version__)")
+        SETUP_VERSION=$(grep "version=" setup.py | cut -d"'" -f2)
+        LAMBDA_VERSION=$(grep "'version':" lambda_handler_secrets.py | grep -o "'[0-9.]*'" | tr -d "'")
+        echo "decoration.py version: $DECORATION_VERSION"
+        echo "setup.py version: $SETUP_VERSION"
+        echo "lambda_handler_secrets.py version: $LAMBDA_VERSION"
+        if [ "$DECORATION_VERSION" != "$SETUP_VERSION" ]; then
+          echo "::error::Version mismatch between decoration.py ($DECORATION_VERSION) and setup.py ($SETUP_VERSION)"
+          exit 1
+        fi
+        if [ "$DECORATION_VERSION" != "$LAMBDA_VERSION" ]; then
+          echo "::warning::Version mismatch between decoration.py ($DECORATION_VERSION) and lambda_handler_secrets.py ($LAMBDA_VERSION)"
+        fi
+
     - name: Test acido imports
       run: |
         python -c "from acido.azure_utils.BlobManager import BlobManager"
@@ -148,6 +164,23 @@ jobs:
         # This will test that acido can create a nuclei image using the correct Docker image
         # It will use environment variables for configuration
         acido create nuclei --image projectdiscovery/nuclei:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
+
+    - name: Test acido create from GitHub repository
+      env:
+        INSTANCE_NAME: test-acido-instance
+        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
+        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
+        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
+        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
+        STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
+      run: |
+        # Test GitHub URL support - build nuclei image directly from projectdiscovery/nuclei repository
+        # This validates the new git+https:// syntax for building images from GitHub
+        acido create git+https://github.com/projectdiscovery/nuclei || echo "Note: Image creation may fail without proper credentials, but command should execute"
 
     - name: E2E Test - Deploy and manage nuclei fleet
       env:

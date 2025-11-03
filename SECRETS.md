@@ -200,10 +200,11 @@ Retrieve and delete a secret using its UUID (one-time access). Provide password 
 ```
 
 **Notes:**
-- Secret is automatically deleted after retrieval (one-time access)
+- Secret is automatically deleted after successful retrieval (one-time access)
 - If secret is encrypted, password must match the one used during creation
-- Wrong password or missing password for encrypted secrets returns 400 error
-- Secret is deleted even if decryption fails (security measure)
+- Wrong password or missing password for encrypted secrets returns 400 error and secret remains accessible for retry
+- Multiple password attempts are allowed until correct password is provided
+- Secret is only deleted upon successful decryption and retrieval
 
 ## Workflow Examples
 
@@ -294,7 +295,7 @@ Retrieve and delete a secret using its UUID (one-time access). Provide password 
    ```
    Response: `{"secret": "Database password: super_secret_123", ...}`
 
-5. **Wrong password** - returns 400 and deletes secret (security measure)
+5. **Wrong password** - returns 400 but secret remains accessible for retry
 
 ## Deployment
 

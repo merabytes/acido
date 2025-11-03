@@ -155,6 +155,13 @@ acido create nmap
 
 # Or specify the full Docker image URL
 acido create nuclei --image projectdiscovery/nuclei:latest
+
+# Or build from a GitHub repository (must contain a Dockerfile)
+acido create git+https://github.com/user/custom-scanner
+
+# With specific branch or tag
+acido create git+https://github.com/user/custom-scanner@main
+acido create git+https://github.com/user/custom-scanner@v1.0.0
 ```
 
 3. Run distributed scan (Docker-like syntax):
@@ -197,8 +204,11 @@ Acido now supports Docker-like subcommands for a more intuitive experience:
 ### Subcommands
 
 ```bash
-# Create acido-compatible image
+# Create acido-compatible image from base Docker image
 acido create <name> [--image <full-image-url>]
+
+# Create acido-compatible image from GitHub repository (must contain Dockerfile)
+acido create git+https://github.com/user/repo[@ref]
 
 # Configure acido
 acido configure
@@ -344,6 +354,36 @@ Remove all fleets matching pattern:
 ```bash
 acido rm 'scan-*'
 ```
+
+### Building from GitHub
+
+Build custom acido-compatible images directly from GitHub repositories containing Dockerfiles:
+
+```bash
+# Build from main branch
+acido create git+https://github.com/myorg/custom-scanner
+
+# Build from specific branch
+acido create git+https://github.com/myorg/custom-scanner@develop
+
+# Build from specific tag
+acido create git+https://github.com/myorg/custom-scanner@v2.1.0
+
+# Build from specific commit
+acido create git+https://github.com/myorg/custom-scanner@abc123def456
+```
+
+**Requirements:**
+- Repository must contain a `Dockerfile` at the root
+- Git must be installed locally
+- Image will be built and pushed to your Azure Container Registry
+
+**Example workflow:**
+1. Create a GitHub repository with your custom Dockerfile
+2. Build the image: `acido create git+https://github.com/myorg/scanner@v1.0`
+3. Use the image: `acido fleet scan -n 10 -im scanner-acido:v1-0 -t 'your-command'`
+
+**Note:** The `--install` option is not supported for GitHub URLs since the Dockerfile defines all dependencies.
 
 ### Single IP Routing
 

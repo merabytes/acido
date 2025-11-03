@@ -38,7 +38,7 @@ def _handle_healthcheck():
     return build_response(200, {
         'status': 'healthy',
         'message': 'Lambda function is running',
-        'version': '0.41.1'
+        'version': '0.42.0'
     }, CORS_HEADERS)
 
 
@@ -117,12 +117,7 @@ def _handle_retrieve_secret(event, vault_manager):
     # Decrypt secret if it's encrypted
     if is_encrypted_secret:
         if not password:
-            # Delete both secret and metadata
-            vault_manager.delete_secret(secret_uuid)
-            try:
-                vault_manager.delete_secret(metadata_key)
-            except Exception:
-                pass
+            # Do NOT delete the secret - allow retry
             return build_response(400, {
                 'error': 'Password required for encrypted secret'
             }, CORS_HEADERS)
@@ -130,12 +125,7 @@ def _handle_retrieve_secret(event, vault_manager):
         try:
             secret_value = decrypt_secret(secret_value, password)
         except ValueError as e:
-            # Delete the secret and metadata even if decryption fails
-            vault_manager.delete_secret(secret_uuid)
-            try:
-                vault_manager.delete_secret(metadata_key)
-            except Exception:
-                pass
+            # Do NOT delete the secret on wrong password - allow retry
             return build_response(400, {
                 'error': f'Decryption failed: {str(e)}'
             }, CORS_HEADERS)
