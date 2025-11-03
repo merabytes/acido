@@ -57,6 +57,17 @@ fleet_parser.add_argument('--format', dest='output_format', choices=['txt', 'jso
 fleet_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 fleet_parser.add_argument('--rm-when-done', dest='rm_when_done', action='store_true', help='Remove after completion')
 
+# Run subcommand (ephemeral single instance with auto-cleanup)
+run_parser = subparsers.add_parser('run', help='Run a single ephemeral container instance with auto-cleanup after specified duration')
+run_parser.add_argument('name', help='Container instance name')
+run_parser.add_argument('-im', '--image', dest='image_name', default='ubuntu', help='Image name')
+run_parser.add_argument('-t', '--task', dest='task', help='Command to execute')
+run_parser.add_argument('-d', '--duration', dest='duration', type=int, default=900, help='Duration in seconds before auto-cleanup (default: 900s/15min, max: 900s)')
+run_parser.add_argument('-o', '--output', dest='write_to_file', help='Save output to file')
+run_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
+run_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
+run_parser.add_argument('--no-cleanup', dest='no_cleanup', action='store_true', help='Skip auto-cleanup after duration')
+
 # List subcommand (Docker-like: acido ls)
 ls_parser = subparsers.add_parser('ls', help='List all container instances')
 
@@ -196,6 +207,11 @@ if args.subcommand == 'configure':
 if args.subcommand == 'fleet':
     if not hasattr(args, 'fleet') or not args.fleet:
         args.fleet = args.fleet_name
+
+# Handle 'run' subcommand
+if args.subcommand == 'run':
+    # Set flag to indicate we're using the run command
+    args.run_instance = True
 
 # Handle 'ls' subcommand
 if args.subcommand == 'ls':
@@ -631,6 +647,140 @@ class Acido(object):
 
         return None if interactive else response, outputs
     
+    def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
+            write_to_file: str = None, output_format: str = 'txt', 
+            quiet: bool = False, cleanup: bool = True):
+        """
+        Run a single ephemeral container instance with auto-cleanup after specified duration.
+        
+        This is designed for use cases like GitHub self-hosted runners where you need:
+        - A single container instance
+        - Auto-cleanup after a specified duration (e.g., 15 minutes for Lambda compatibility)
+        - Optional output capture
+        
+        Args:
+            name: Container instance name
+            image_name: Full image URL
+            task: Command to execute (optional)
+            duration: Duration in seconds before auto-cleanup (default: 900s/15min, max: 900s)
+            write_to_file: Save output to file (optional)
+            output_format: Output format ('txt' or 'json')
+            quiet: Quiet mode with progress bar
+            cleanup: Whether to auto-cleanup after duration (default: True)
+        
+        Returns:
+            tuple: (response dict, outputs dict) or None if interactive mode
+        """
+        # Validate duration (max 15 minutes for Lambda compatibility)
+        if duration > 900:
+            duration = 900
+            print(bad(f'Duration exceeds maximum of 900s (15 minutes). Using maximum duration.'))
+        elif duration < 1:
+            duration = 900
+            print(bad(f'Invalid duration. Using default of 900s (15 minutes).'))
+        
+        def print_if_not_quiet(msg):
+            if not quiet:
+                print(msg)
+        
+        # Create the container instance
+        env_vars = {
+            'AZURE_RESOURCE_GROUP': self.rg,
+            'IMAGE_REGISTRY_SERVER': self.image_registry_server,
+            'IMAGE_REGISTRY_USERNAME': self.image_registry_username,
+            'IMAGE_REGISTRY_PASSWORD': self.image_registry_password,
+            'STORAGE_ACCOUNT_NAME': self.storage_account,
+            'STORAGE_ACCOUNT_KEY': self.blob_manager.account_key,
+            'MANAGED_IDENTITY_ID': self.user_assigned.get('id', None),
+            'MANAGED_IDENTITY_CLIENT_ID': self.user_assigned.get('clientId', None),
+            'BLOB_CONNECTION': (
+                "DefaultEndpointsProtocol=https;"
+                f"AccountName={self.blob_manager.account_name};AccountKey={self.blob_manager.account_key};"
+                "EndpointSuffix=core.windows.net"
+            )
+        }
+        
+        response = {}
+        outputs = {}
+        
+        # Deploy the single instance
+        print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
+        
+        response[name], _ = self.instance_manager.deploy(
+            name=name,
+            instance_number=1,
+            image_name=image_name,
+            command=task,
+            env_vars=env_vars,
+            network_profile=self.network_profile,
+            input_files=None,
+            quiet=quiet
+        )
+        
+        print_if_not_quiet(good(f"Successfully created container instance: [ {bold(name)} ]"))
+        
+        if quiet:
+            pbar = tqdm(total=3, desc="Container execution", unit="step")
+            pbar.set_description("Provisioning container")
+        
+        # Wait for container to provision
+        print_if_not_quiet(good('Waiting 1 minute until the container gets provisioned...'))
+        time.sleep(60)
+        
+        if quiet:
+            pbar.update(1)
+            pbar.set_description(f"Running for {duration}s")
+        
+        # Let it run for the specified duration
+        print_if_not_quiet(good(f'Container running for {duration} seconds...'))
+        time.sleep(duration)
+        
+        if quiet:
+            pbar.update(1)
+        
+        # Capture output if task was provided
+        if task:
+            if quiet:
+                pbar.set_description("Collecting output")
+            else:
+                print(good('Collecting output...'))
+            
+            # Get container logs
+            container_name = f'{name}-01'
+            try:
+                output = self.instance_manager.get_container_logs(name, container_name)
+                outputs[container_name] = output
+                if not quiet:
+                    print(good(f'Output from {bold(container_name)}: [\n{output.strip()}\n]'))
+            except Exception as e:
+                if not quiet:
+                    print(bad(f'Failed to get output from {bold(container_name)}: {str(e)}'))
+        
+        if quiet:
+            pbar.update(1)
+            pbar.close()
+        
+        # Handle output
+        if write_to_file and outputs:
+            if output_format == 'json':
+                with open(write_to_file, 'w') as f:
+                    f.write(json.dumps(outputs, indent=4))
+                print_if_not_quiet(good(f'Saved container output at: {write_to_file}'))
+            else:  # txt format
+                with open(write_to_file, 'w') as f:
+                    f.write('\n'.join([o.rstrip() for o in outputs.values()]))
+                print_if_not_quiet(good(f'Saved output at: {write_to_file}'))
+        
+        # Auto-cleanup if enabled
+        if cleanup:
+            print_if_not_quiet(good(f'Cleaning up container instance: {bold(name)}'))
+            self.rm(name)
+            print_if_not_quiet(good(f'Successfully cleaned up container instance: {bold(name)}'))
+        else:
+            print_if_not_quiet(info(f'Container instance {bold(name)} is still running. Use "acido rm {name}" to clean up manually.'))
+        
+        return response, outputs
+
 
     def rm(self, selection):
         self.all_instances, self.instances_named = self.ls(interactive=False)
@@ -1573,6 +1723,19 @@ def main():
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
+    if hasattr(args, 'run_instance') and args.run_instance:
+        # Build full image URL from short name or keep full URL
+        full_image_url = acido.build_image_url(args.image_name, getattr(args, 'image_tag', 'latest'))
+        acido.run(
+            name=args.name,
+            image_name=full_image_url,
+            task=args.task,
+            duration=args.duration,
+            write_to_file=args.write_to_file,
+            output_format=args.output_format,
+            quiet=args.quiet,
+            cleanup=not args.no_cleanup
+        )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
     if args.exec_cmd:

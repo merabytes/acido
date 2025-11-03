@@ -32,6 +32,7 @@ This implementation follows the OneTimeSecret pattern where secrets self-destruc
 - **Retrieve Secret**: Get the secret once using the UUID (auto-deletes after retrieval)
 - **Check Secret**: Check if a secret is encrypted without retrieving it (non-destructive)
 - **Password Encryption**: Optional client-side password protection for secrets
+- **Time-based Expiration**: Optional expiration time for automatic secret deletion
 - **Secure Storage**: All secrets stored in Azure KeyVault with explicit encryption metadata
 - **Serverless**: Runs on AWS Lambda with automatic scaling
 - **Continuous Deployment**: Automated deployment via GitHub Actions
@@ -41,23 +42,32 @@ This implementation follows the OneTimeSecret pattern where secrets self-destruc
 
 The API provides three main operations:
 
-1. **Create**: Store a secret (with optional password encryption) and get a UUID
-2. **Check**: Verify if a secret is encrypted before attempting to retrieve it
+1. **Create**: Store a secret (with optional password encryption and/or expiration time) and get a UUID
+2. **Check**: Verify if a secret is encrypted and/or has expiration before attempting to retrieve it
 3. **Retrieve**: Get the secret once (with password if encrypted) and auto-delete
 
 ### Encryption Metadata
 
-When creating a secret, the service stores two items in Azure KeyVault:
+When creating a secret, the service stores up to three items in Azure KeyVault:
 - `{uuid}` - The actual secret value (encrypted or plaintext)
 - `{uuid}-metadata` - Explicit marker indicating "encrypted" or "plaintext"
+- `{uuid}-expires` - (Optional) ISO 8601 expiration timestamp
 
 This ensures bulletproof detection of encryption status without content inspection, preventing false positives from base64-encoded data.
+
+### Time-based Expiration
+
+Secrets can be created with an optional expiration time:
+- Provide `expires_at` in ISO 8601 format (e.g., "2024-12-31T23:59:59Z")
+- Expired secrets are automatically detected and deleted when accessed
+- Returns HTTP 410 Gone for expired secrets
+- Expiration is checked during both `check` and `retrieve` operations
 
 ## API Reference
 
 ### Create Secret
 
-Store a new secret and receive a UUID to access it. Optionally encrypt with a password.
+Store a new secret and receive a UUID to access it. Optionally encrypt with a password and/or set an expiration time.
 
 **Request (plaintext secret):**
 ```json
@@ -78,6 +88,27 @@ Store a new secret and receive a UUID to access it. Optionally encrypt with a pa
 }
 ```
 
+**Request (secret with expiration time):**
+```json
+{
+  "action": "create",
+  "secret": "Your secret message here",
+  "expires_at": "2024-12-31T23:59:59Z",
+  "turnstile_token": "cloudflare-turnstile-response-token"
+}
+```
+
+**Request (password-encrypted secret with expiration):**
+```json
+{
+  "action": "create",
+  "secret": "Your secret message here",
+  "password": "your-encryption-password",
+  "expires_at": "2024-12-31T23:59:59Z",
+  "turnstile_token": "cloudflare-turnstile-response-token"
+}
+```
+
 **Response (201 Created):**
 ```json
 {
@@ -86,15 +117,34 @@ Store a new secret and receive a UUID to access it. Optionally encrypt with a pa
 }
 ```
 
+**Response (201 Created - with expiration):**
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "message": "Secret created successfully",
+  "expires_at": "2024-12-31T23:59:59Z"
+}
+```
+
 **Notes:**
 - If `password` is provided, the secret is encrypted with AES-256 using PBKDF2 key derivation
 - The same password must be provided during retrieval to decrypt
 - Metadata is stored to track encryption status (bulletproof detection)
+- If `expires_at` is provided, the secret will automatically expire and be deleted at that time
+- `expires_at` must be in ISO 8601 format (e.g., "2024-12-31T23:59:59Z") and in the future
+- Expired secrets return a 410 Gone status and are automatically deleted
 
 **Response (400 Bad Request - Turnstile enabled, token missing):**
 ```json
 {
   "error": "Missing required field: turnstile_token (bot protection enabled)"
+}
+```
+
+**Response (400 Bad Request - Invalid expiration):**
+```json
+{
+  "error": "expires_at must be in the future"
 }
 ```
 
@@ -134,10 +184,27 @@ Check if a secret is encrypted without retrieving or deleting it. This is useful
 }
 ```
 
+**Response (200 OK - Secret with expiration):**
+```json
+{
+  "encrypted": false,
+  "requires_password": false,
+  "expires_at": "2024-12-31T23:59:59Z"
+}
+```
+
 **Response (404 Not Found):**
 ```json
 {
   "error": "Secret not found or already accessed"
+}
+```
+
+**Response (410 Gone - Secret expired):**
+```json
+{
+  "error": "Secret has expired and has been deleted",
+  "expired_at": "2024-12-31T23:59:59+00:00"
 }
 ```
 
@@ -146,6 +213,8 @@ Check if a secret is encrypted without retrieving or deleting it. This is useful
 - Uses stored metadata for bulletproof encryption detection
 - No content inspection or heuristics - 100% reliable
 - Frontend can use `requires_password` to show/hide password input
+- If secret has expiration, `expires_at` field will be included in the response
+- Expired secrets return 410 Gone and are automatically deleted
 
 ### Retrieve Secret
 
@@ -199,12 +268,21 @@ Retrieve and delete a secret using its UUID (one-time access). Provide password 
 }
 ```
 
+**Response (410 Gone - Secret expired):**
+```json
+{
+  "error": "Secret has expired and has been deleted",
+  "expired_at": "2024-12-31T23:59:59+00:00"
+}
+```
+
 **Notes:**
 - Secret is automatically deleted after successful retrieval (one-time access)
 - If secret is encrypted, password must match the one used during creation
 - Wrong password or missing password for encrypted secrets returns 400 error and secret remains accessible for retry
 - Multiple password attempts are allowed until correct password is provided
 - Secret is only deleted upon successful decryption and retrieval
+- Expired secrets return 410 Gone status and are automatically deleted from storage
 
 ## Workflow Examples
 

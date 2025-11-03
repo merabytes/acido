@@ -1,0 +1,8 @@
+{
+  "operation": "run",
+  "name": "github-runner-01",
+  "image": "github-runner",
+  "task": "./run.sh --url https://github.com/myorg/myrepo --token ${RUNNER_TOKEN}",
+  "duration": 900,
+  "cleanup": true
+}
