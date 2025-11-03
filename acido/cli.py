@@ -35,10 +35,10 @@ parser = argparse.ArgumentParser()
 subparsers = parser.add_subparsers(dest='subcommand', help='Subcommands')
 
 # Create subcommand
-create_parser = subparsers.add_parser('create', help='Create acido-compatible image from base image')
-create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", "ubuntu:20.04")')
-create_parser.add_argument('--image', dest='base_image_url', help='Full Docker image URL to use as base (e.g., "projectdiscovery/nuclei:latest")')
-create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan)')
+create_parser = subparsers.add_parser('create', help='Create acido-compatible image from base image or GitHub repository')
+create_parser.add_argument('base_image', help='Base image name (e.g., "nuclei", "ubuntu:20.04") or GitHub URL (e.g., "git+https://github.com/user/repo@branch")')
+create_parser.add_argument('--image', dest='base_image_url', help='Full Docker image URL to use as base (e.g., "projectdiscovery/nuclei:latest") or GitHub URL')
+create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan). Only works with base images, not GitHub URLs.')
 create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 
 # Configure subcommand (alias for -c/--config)
@@ -860,6 +860,58 @@ class Acido(object):
         
         return True
 
+    def _parse_github_url(self, url: str) -> dict:
+        """
+        Parse a GitHub URL in git+https:// format.
+        
+        Supports formats:
+        - git+https://github.com/user/repo
+        - git+https://github.com/user/repo.git
+        - git+https://github.com/user/repo@branch
+        - git+https://github.com/user/repo@v1.0
+        - git+https://github.com/user/repo.git@commit_sha
+        
+        Returns:
+            dict: {
+                'repo_url': 'https://github.com/user/repo.git',
+                'ref': 'branch/tag/commit or None',
+                'repo_name': 'repo'
+            } or None if not a valid GitHub URL
+        """
+        import re
+        
+        # Check if it starts with git+https://
+        if not url.startswith('git+https://'):
+            return None
+        
+        # Remove git+ prefix
+        url_without_prefix = url[4:]  # Remove 'git+'
+        
+        # Parse the URL with optional @ref
+        # Pattern: https://github.com/user/repo(.git)?(@ref)?
+        pattern = r'^https://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+?)(\.git)?(@([a-zA-Z0-9_./+-]+))?$'
+        match = re.match(pattern, url_without_prefix)
+        
+        if not match:
+            return None
+        
+        user = match.group(1)
+        repo = match.group(2)
+        ref = match.group(5)  # Optional ref after @
+        
+        # Build the full repo URL
+        repo_url = f'https://github.com/{user}/{repo}.git'
+        
+        return {
+            'repo_url': repo_url,
+            'ref': ref,  # None if not specified
+            'repo_name': repo
+        }
+
+    def _is_github_url(self, url: str) -> bool:
+        """Check if a string is a GitHub URL in git+https:// format."""
+        return url.startswith('git+https://github.com/')
+
     def _validate_image_name(self, image_name: str) -> bool:
         """
         Validate Docker image name using allowlist approach to prevent command injection.
@@ -1093,19 +1145,191 @@ ENTRYPOINT []
 CMD ["sleep", "infinity"]
 """
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False):
+    def create_acido_image_from_github(self, github_url: str, quiet: bool = False) -> str:
         """
-        Create an acido-compatible Docker image from a base image.
+        Create an acido-compatible Docker image from a GitHub repository.
+        
+        The repository must contain a Dockerfile at the root.
         
         Args:
-            base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04')
+            github_url: GitHub URL in git+https:// format (e.g., 'git+https://github.com/user/repo@branch')
             quiet: Suppress verbose output and show progress bar
-            install_packages: List of packages to install (e.g., ['nmap', 'masscan'])
-            no_update: Skip package list update before installing packages
         
         Returns:
             str: The new image name if successful, None otherwise
         """
+        # Validate Docker is available
+        try:
+            result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                if not quiet:
+                    print(bad('Docker is not installed or not accessible.'))
+                    print(info('Please install Docker and ensure it is in your PATH.'))
+                return None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            if not quiet:
+                print(bad('Docker is not installed or not accessible.'))
+                print(info('Please install Docker and ensure it is in your PATH.'))
+            return None
+        
+        # Validate git is available
+        try:
+            result = subprocess.run(['git', '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode != 0:
+                if not quiet:
+                    print(bad('Git is not installed or not accessible.'))
+                    print(info('Please install Git and ensure it is in your PATH.'))
+                return None
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            if not quiet:
+                print(bad('Git is not installed or not accessible.'))
+                print(info('Please install Git and ensure it is in your PATH.'))
+            return None
+        
+        # Parse GitHub URL
+        github_info = self._parse_github_url(github_url)
+        if not github_info:
+            if not quiet:
+                print(bad(f'Invalid GitHub URL: {github_url}'))
+                print(info('Expected format: git+https://github.com/user/repo[@ref]'))
+            return None
+        
+        if not quiet:
+            print(good(f'Cloning repository: {github_info["repo_url"]}'))
+            if github_info['ref']:
+                print(info(f'Using ref: {github_info["ref"]}'))
+        
+        # Create temporary directory for cloning
+        with tempfile.TemporaryDirectory() as tmpdir:
+            repo_dir = os.path.join(tmpdir, 'repo')
+            
+            # Clone the repository
+            clone_cmd = ['git', 'clone']
+            if github_info['ref']:
+                # Clone specific branch/tag
+                clone_cmd.extend(['--branch', github_info['ref']])
+            clone_cmd.extend([github_info['repo_url'], repo_dir])
+            
+            if not quiet:
+                print(info('Cloning repository...'))
+            
+            result = subprocess.run(clone_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                if not quiet:
+                    print(bad(f'Failed to clone repository:'))
+                    print(result.stderr)
+                return None
+            
+            # Check if Dockerfile exists
+            dockerfile_path = os.path.join(repo_dir, 'Dockerfile')
+            if not os.path.exists(dockerfile_path):
+                if not quiet:
+                    print(bad('No Dockerfile found in repository root'))
+                    print(info('The repository must contain a Dockerfile at the root'))
+                return None
+            
+            # Generate image name
+            repo_name = github_info['repo_name']
+            image_tag = github_info['ref'] if github_info['ref'] else 'latest'
+            # Sanitize tag (replace / with -)
+            image_tag = image_tag.replace('/', '-')
+            new_image_name = f"{self.image_registry_server}/{repo_name}-acido:{image_tag}"
+            
+            # Validate new image name
+            if not self._validate_image_name(new_image_name):
+                if not quiet:
+                    print(bad(f'Generated invalid image name: {new_image_name}'))
+                return None
+            
+            if not quiet:
+                print(good(f'Building image: {new_image_name}'))
+            
+            # Build the image
+            result = subprocess.run(
+                ['docker', 'build', '-t', new_image_name, repo_dir],
+                capture_output=True, text=True
+            )
+            
+            if result.returncode != 0:
+                if not quiet:
+                    print(bad(f'Failed to build image:'))
+                    print(result.stderr)
+                return None
+            
+            # Show build output only if not quiet
+            if not quiet and result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        print(f'  {line}')
+            
+            if not quiet:
+                print(good(f'Successfully built {new_image_name}'))
+            
+            # Login to registry
+            if not quiet:
+                print(info(f'Logging in to registry...'))
+            result = subprocess.run(
+                ['docker', 'login', self.image_registry_server, '-u', self.image_registry_username, 
+                 '--password-stdin'],
+                input=self.image_registry_password.encode(),
+                capture_output=True,
+                text=False
+            )
+            
+            if result.returncode != 0:
+                if not quiet:
+                    print(bad(f'Failed to login to registry'))
+                return None
+            
+            # Push to registry
+            if not quiet:
+                print(info(f'Pushing to registry...'))
+            result = subprocess.run(
+                ['docker', 'push', new_image_name],
+                capture_output=True, text=True
+            )
+            
+            if result.returncode != 0:
+                if not quiet:
+                    print(bad(f'Failed to push image:'))
+                    print(result.stderr)
+                return None
+            
+            # Show push output only if not quiet
+            if not quiet and result.stdout:
+                for line in result.stdout.split('\n'):
+                    if line.strip():
+                        print(f'  {line}')
+            
+            # Extract short name for user-friendly message
+            short_name = f"{repo_name}-acido:{image_tag}"
+            
+            if not quiet:
+                print(good(f'Successfully pushed {new_image_name}'))
+                print(info(f'You can now use this image with: acido -f myfleet -im {short_name}'))
+            
+            return new_image_name
+
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False):
+        """
+        Create an acido-compatible Docker image from a base image or GitHub repository.
+        
+        Args:
+            base_image: Base Docker image name (e.g., 'nuclei', 'ubuntu:20.04') or GitHub URL (e.g., 'git+https://github.com/user/repo@branch')
+            quiet: Suppress verbose output and show progress bar
+            install_packages: List of packages to install (e.g., ['nmap', 'masscan']) - only applicable for base images, not GitHub URLs
+            no_update: Skip package list update before installing packages - only applicable for base images
+        
+        Returns:
+            str: The new image name if successful, None otherwise
+        """
+        # Check if this is a GitHub URL
+        if self._is_github_url(base_image):
+            if install_packages:
+                if not quiet:
+                    print(orange('Warning: --install option is ignored when building from GitHub URL'))
+            return self.create_acido_image_from_github(base_image, quiet=quiet)
+        
         # Validate Docker is available
         try:
             result = subprocess.run(['docker', '--version'], capture_output=True, text=True, timeout=5)
