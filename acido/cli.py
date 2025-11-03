@@ -878,8 +878,6 @@ class Acido(object):
                 'repo_name': 'repo'
             } or None if not a valid GitHub URL
         """
-        import re
-        
         # Check if it starts with git+https://
         if not url.startswith('git+https://'):
             return None
@@ -1204,21 +1202,54 @@ CMD ["sleep", "infinity"]
             repo_dir = os.path.join(tmpdir, 'repo')
             
             # Clone the repository
-            clone_cmd = ['git', 'clone']
             if github_info['ref']:
-                # Clone specific branch/tag
-                clone_cmd.extend(['--branch', github_info['ref']])
-            clone_cmd.extend([github_info['repo_url'], repo_dir])
-            
-            if not quiet:
-                print(info('Cloning repository...'))
-            
-            result = subprocess.run(clone_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
+                # For refs (branch/tag/commit), we need different strategies
+                # Try clone with --branch first (works for branches and tags)
+                clone_cmd = ['git', 'clone', '--branch', github_info['ref'], github_info['repo_url'], repo_dir]
+                
                 if not quiet:
-                    print(bad(f'Failed to clone repository:'))
-                    print(result.stderr)
-                return None
+                    print(info('Cloning repository...'))
+                
+                result = subprocess.run(clone_cmd, capture_output=True, text=True)
+                
+                # If --branch failed (e.g., commit SHA), clone the full repo and checkout
+                if result.returncode != 0:
+                    if not quiet:
+                        print(info(f'Cloning full repository and checking out {github_info["ref"]}...'))
+                    
+                    # Clone without --branch
+                    clone_cmd = ['git', 'clone', github_info['repo_url'], repo_dir]
+                    result = subprocess.run(clone_cmd, capture_output=True, text=True)
+                    
+                    if result.returncode != 0:
+                        if not quiet:
+                            print(bad(f'Failed to clone repository:'))
+                            print(result.stderr)
+                        return None
+                    
+                    # Checkout specific ref (works for commit SHA)
+                    checkout_cmd = ['git', '-C', repo_dir, 'checkout', github_info['ref']]
+                    result = subprocess.run(checkout_cmd, capture_output=True, text=True)
+                    
+                    if result.returncode != 0:
+                        if not quiet:
+                            print(bad(f'Failed to checkout {github_info["ref"]}:'))
+                            print(result.stderr)
+                        return None
+            else:
+                # No ref specified, clone default branch
+                clone_cmd = ['git', 'clone', github_info['repo_url'], repo_dir]
+                
+                if not quiet:
+                    print(info('Cloning repository...'))
+                
+                result = subprocess.run(clone_cmd, capture_output=True, text=True)
+                
+                if result.returncode != 0:
+                    if not quiet:
+                        print(bad(f'Failed to clone repository:'))
+                        print(result.stderr)
+                    return None
             
             # Check if Dockerfile exists
             dockerfile_path = os.path.join(repo_dir, 'Dockerfile')
@@ -1231,9 +1262,17 @@ CMD ["sleep", "infinity"]
             # Generate image name
             repo_name = github_info['repo_name']
             image_tag = github_info['ref'] if github_info['ref'] else 'latest'
-            # Sanitize tag (replace / with -)
-            image_tag = image_tag.replace('/', '-')
-            new_image_name = f"{self.image_registry_server}/{repo_name}-acido:{image_tag}"
+            # Sanitize tag for Docker compatibility
+            # Docker tags can only contain [a-zA-Z0-9._-]
+            # Replace any other character with hyphen and ensure it doesn't start/end with separator
+            sanitized_tag = re.sub(r'[^a-zA-Z0-9._-]', '-', image_tag)
+            # Remove leading/trailing separators
+            sanitized_tag = sanitized_tag.strip('.-_')
+            # Ensure tag is not empty
+            if not sanitized_tag:
+                sanitized_tag = 'latest'
+            
+            new_image_name = f"{self.image_registry_server}/{repo_name}-acido:{sanitized_tag}"
             
             # Validate new image name
             if not self._validate_image_name(new_image_name):

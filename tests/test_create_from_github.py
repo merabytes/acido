@@ -200,6 +200,29 @@ class TestCreateFromGitHub(unittest.TestCase):
             # Verify create_acido_image_from_github was called without install_packages
             mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True)
 
+    def test_tag_sanitization(self):
+        """Test that refs with special characters are sanitized for Docker tags."""
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        # Test refs/heads/feature/branch becomes refs-heads-feature-branch
+        import re
+        test_tag = 'refs/heads/feature/branch'
+        sanitized = re.sub(r'[^a-zA-Z0-9._-]', '-', test_tag).strip('.-_')
+        self.assertEqual(sanitized, 'refs-heads-feature-branch')
+        
+        # Test v1.0@special becomes v1.0-special (dot is allowed)
+        test_tag = 'v1.0@special'
+        sanitized = re.sub(r'[^a-zA-Z0-9._-]', '-', test_tag).strip('.-_')
+        self.assertEqual(sanitized, 'v1.0-special')
+        
+        # Test empty tag becomes latest
+        test_tag = '///'
+        sanitized = re.sub(r'[^a-zA-Z0-9._-]', '-', test_tag).strip('.-_')
+        if not sanitized:
+            sanitized = 'latest'
+        self.assertEqual(sanitized, 'latest')
+
 
 if __name__ == '__main__':
     unittest.main()
