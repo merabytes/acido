@@ -106,6 +106,69 @@ Inspired by [axiom](https://github.com/pry0cc/axiom).
 - Docker
 - Azure account ([free tier](https://azure.microsoft.com/free/) works)
 
+### Option 1: Quick Setup in Azure Cloud Shell (Recommended)
+
+The easiest way to set up acido is using the automated install script in Azure Cloud Shell. This script creates all required Azure resources with a single command.
+
+1. **Open Azure Cloud Shell:**
+   - Go to [Azure Portal](https://portal.azure.com)
+   - Click the Cloud Shell icon (>_) in the top navigation bar
+   - Choose Bash when prompted
+
+2. **Upload and run the install script:**
+   ```bash
+   # Download the install script
+   curl -o install.sh https://raw.githubusercontent.com/merabytes/acido/main/install.sh
+   chmod +x install.sh
+   
+   # Run the script with your preferred configuration
+   # Replace SUB_ID with your Azure Subscription ID
+   ./install.sh \
+     -s SUB_ID \
+     -g acido-rg \
+     -l eastus \
+     -p acido \
+     -a acidocr \
+     -S acidostore123 \
+     --show-secret \
+     --emit-env-file acido.env \
+     --create-rg
+   ```
+
+   **What this creates:**
+   - Service Principal with appropriate permissions
+   - Azure Container Registry (ACR) for Docker images
+   - Storage Account with blob container for input/output files
+   - User Assigned Managed Identity (optional)
+   - Key Vault (optional with `-k` flag)
+
+3. **Load environment variables:**
+   ```bash
+   source acido.env
+   ```
+
+4. **Install acido:**
+   ```bash
+   pip install acido
+   ```
+
+5. **You're ready!** Skip the `az login` step - the environment variables are already configured.
+
+**Advanced options:**
+```bash
+# Least privilege mode (granular permissions instead of Contributor)
+./install.sh -s SUB -g acido-rg -l eastus -p acido -a acidocr -S acidostore \
+  --least-privilege --identity-name acido-id --emit-env-file acido.env
+
+# Include Key Vault for secrets management
+./install.sh -s SUB -g acido-rg -l eastus -p acido -S acidostore \
+  -k acidokv --kv-secret STORAGE_CONN="your-connection-string" --emit-env-file acido.env
+```
+
+For complete install.sh options, run: `./install.sh --help`
+
+### Option 2: Manual Setup
+
 **Setup:**
 
 1. Install acido:
@@ -139,7 +202,7 @@ Provide: resource group name, registry server (e.g., `myregistry.azurecr.io`), r
 - `STORAGE_ACCOUNT_NAME`
 - `STORAGE_ACCOUNT_KEY` (optional, if not provided will fetch from Azure)
 
-See [.github/AZURE_PERMISSIONS.md](.github/AZURE_PERMISSIONS.md) for Service Principal setup.
+See [.github/AZURE_PERMISSIONS.md](.github/AZURE_PERMISSIONS.md) for detailed Service Principal setup and permissions.
 
 ## Quick Start
 
