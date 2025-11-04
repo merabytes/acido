@@ -198,6 +198,8 @@ For CI/CD pipelines, add these as GitHub repository secrets:
 1. Go to your repository on GitHub
 2. Settings → Secrets and variables → Actions
 3. Add the following secrets:
+
+#### For CI Tests
    - `AZURE_TENANT_ID`
    - `AZURE_CLIENT_ID`
    - `AZURE_CLIENT_SECRET`
@@ -206,6 +208,23 @@ For CI/CD pipelines, add these as GitHub repository secrets:
    - `AZURE_REGISTRY_SERVER`
    - `AZURE_REGISTRY_USERNAME`
    - `AZURE_REGISTRY_PASSWORD`
+
+#### For Lambda Deployment (Main Lambda - Container Management)
+   - `LAMBDA_AZURE_TENANT_ID`
+   - `LAMBDA_AZURE_CLIENT_ID`
+   - `LAMBDA_AZURE_CLIENT_SECRET`
+
+#### For Secrets Lambda Deployment (Secrets Service)
+   - `SECRETS_AZURE_TENANT_ID`
+   - `SECRETS_AZURE_CLIENT_ID`
+   - `SECRETS_AZURE_CLIENT_SECRET`
+   - `KEY_VAULT_NAME`
+
+**Security Best Practice:** Use separate Service Principals for the main Lambda and Secrets Lambda to ensure proper identity separation:
+- **Main Lambda SP**: Requires full container and network management permissions
+- **Secrets Lambda SP**: Only requires Key Vault access, no container permissions needed
+
+This separation follows the principle of least privilege and limits the blast radius if credentials are compromised.
 
 ### Option 3: Interactive Prompt
 
@@ -300,6 +319,91 @@ Set the managed identity in your container instances:
 ```bash
 export IDENTITY_CLIENT_ID="$IDENTITY_CLIENT_ID"
 ```
+
+## Separate Service Principals for Lambda Deployments
+
+For enhanced security, create separate Service Principals for different Lambda functions. This follows the principle of least privilege and limits access if credentials are compromised.
+
+### Main Lambda Service Principal (Container Management)
+
+The main Lambda function requires full container and network management permissions:
+
+```bash
+# Create Service Principal for main Lambda
+MAIN_LAMBDA_SP_NAME="acido-main-lambda-sp"
+
+az ad sp create-for-rbac \
+  --name $MAIN_LAMBDA_SP_NAME \
+  --role Contributor \
+  --scopes /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP \
+  --sdk-auth
+
+# Get the Service Principal Object ID
+MAIN_SP_OBJECT_ID=$(az ad sp list --display-name $MAIN_LAMBDA_SP_NAME --query "[0].id" -o tsv)
+
+# Assign specific roles
+az role assignment create \
+  --assignee $MAIN_SP_OBJECT_ID \
+  --role "Container Instances Contributor" \
+  --scope /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP
+
+az role assignment create \
+  --assignee $MAIN_SP_OBJECT_ID \
+  --role "Storage Blob Data Contributor" \
+  --scope $STORAGE_ACCOUNT_ID
+
+az role assignment create \
+  --assignee $MAIN_SP_OBJECT_ID \
+  --role "Network Contributor" \
+  --scope /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP
+
+az role assignment create \
+  --assignee $MAIN_SP_OBJECT_ID \
+  --role "AcrPull" \
+  --scope $ACR_ID
+```
+
+Save these credentials as:
+- `LAMBDA_AZURE_TENANT_ID`
+- `LAMBDA_AZURE_CLIENT_ID`
+- `LAMBDA_AZURE_CLIENT_SECRET`
+
+### Secrets Lambda Service Principal (Key Vault Only)
+
+The Secrets Lambda only needs access to Azure Key Vault:
+
+```bash
+# Create Service Principal for Secrets Lambda
+SECRETS_LAMBDA_SP_NAME="acido-secrets-lambda-sp"
+
+az ad sp create-for-rbac \
+  --name $SECRETS_LAMBDA_SP_NAME \
+  --role "Key Vault Secrets User" \
+  --scopes /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME \
+  --sdk-auth
+
+# Get the Service Principal Object ID
+SECRETS_SP_OBJECT_ID=$(az ad sp list --display-name $SECRETS_LAMBDA_SP_NAME --query "[0].id" -o tsv)
+
+# Ensure Key Vault access
+az role assignment create \
+  --assignee $SECRETS_SP_OBJECT_ID \
+  --role "Key Vault Secrets User" \
+  --scope /subscriptions/$SUBSCRIPTION_ID/resourceGroups/$RESOURCE_GROUP/providers/Microsoft.KeyVault/vaults/$KEY_VAULT_NAME
+```
+
+Save these credentials as:
+- `SECRETS_AZURE_TENANT_ID`
+- `SECRETS_AZURE_CLIENT_ID`
+- `SECRETS_AZURE_CLIENT_SECRET`
+
+### Benefits of Separation
+
+- **Least Privilege**: Each Lambda only has permissions it needs
+- **Security Isolation**: Compromise of one identity doesn't affect the other
+- **Audit Trail**: Clear separation of which service performed which action
+- **Compliance**: Easier to demonstrate security controls for audits
+
 
 ## Security Best Practices
 
