@@ -239,7 +239,7 @@ Build the Docker image from the latest version:
 
 Or from a specific branch/tag:
 ```bash
-./build.sh v0.44.0
+./build.sh v0.45.0
 ./build.sh feature-branch
 ```
 

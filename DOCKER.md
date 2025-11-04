@@ -15,7 +15,7 @@ Build the acido CLI image from the latest main branch:
 Or from a specific branch/tag:
 
 ```bash
-./build.sh v0.44.0
+./build.sh v0.45.0
 ./build.sh feature-branch
 ```
 
@@ -84,7 +84,7 @@ The `build.sh` script automates building the Docker image from the GitHub reposi
 **Examples:**
 ```bash
 ./build.sh main           # Build from main branch
-./build.sh v0.44.0        # Build from a specific release
+./build.sh v0.45.0        # Build from a specific release
 ./build.sh feature-x      # Build from a feature branch
 ```
 

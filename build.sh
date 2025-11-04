@@ -6,7 +6,7 @@
 #
 # Examples:
 #   ./build.sh main
-#   ./build.sh v0.44.0
+#   ./build.sh v0.45.0
 #   ./build.sh feature-branch
 #
 # This script builds the acido CLI Docker image from a specific branch/tag/commit
