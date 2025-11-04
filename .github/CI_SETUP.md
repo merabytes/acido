@@ -14,7 +14,7 @@ To run the full integration tests with Azure, you need to configure the followin
 2. Click on **Settings** → **Secrets and variables** → **Actions**
 3. Click **New repository secret** for each of the following:
 
-### Azure Credentials
+### Azure Credentials (for CI Tests)
 
 | Secret Name | Description | Example Value |
 |------------|-------------|---------------|
@@ -29,12 +29,36 @@ For full Azure integration tests, you can also configure:
 
 | Secret Name | Description |
 |------------|-------------|
-| `AZURE_CLIENT_ID` | Azure Service Principal Client ID |
-| `AZURE_CLIENT_SECRET` | Azure Service Principal Client Secret |
-| `AZURE_TENANT_ID` | Azure Tenant ID |
+| `AZURE_CLIENT_ID` | Azure Service Principal Client ID (for CI tests) |
+| `AZURE_CLIENT_SECRET` | Azure Service Principal Client Secret (for CI tests) |
+| `AZURE_TENANT_ID` | Azure Tenant ID (for CI tests) |
 | `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID |
 
-**See [AZURE_PERMISSIONS.md](AZURE_PERMISSIONS.md) for detailed instructions on creating a Service Principal with the correct permissions.**
+### Lambda Deployment Credentials (CD Pipeline)
+
+For Lambda deployments, use **separate** Service Principals for each Lambda function:
+
+#### Main Lambda (Container Management)
+| Secret Name | Description |
+|------------|-------------|
+| `LAMBDA_AZURE_TENANT_ID` | Azure Tenant ID for main Lambda |
+| `LAMBDA_AZURE_CLIENT_ID` | Service Principal Client ID for main Lambda |
+| `LAMBDA_AZURE_CLIENT_SECRET` | Service Principal Client Secret for main Lambda |
+
+#### Secrets Lambda (Key Vault Access)
+| Secret Name | Description |
+|------------|-------------|
+| `SECRETS_AZURE_TENANT_ID` | Azure Tenant ID for Secrets Lambda |
+| `SECRETS_AZURE_CLIENT_ID` | Service Principal Client ID for Secrets Lambda |
+| `SECRETS_AZURE_CLIENT_SECRET` | Service Principal Client Secret for Secrets Lambda |
+| `KEY_VAULT_NAME` | Azure Key Vault name for secrets storage |
+
+**Security Best Practice:** The separation of credentials ensures:
+- Main Lambda SP has container/network permissions, no Key Vault access
+- Secrets Lambda SP has only Key Vault access, no container permissions
+- Principle of least privilege applied to both identities
+
+**See [AZURE_PERMISSIONS.md](AZURE_PERMISSIONS.md) for detailed instructions on creating separate Service Principals with the correct permissions.**
 
 ## CI Workflow Overview
 

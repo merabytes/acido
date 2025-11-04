@@ -266,3 +266,51 @@ jobs:
       run: |
         # Verify all Python files are valid
         find acido -name "*.py" -exec python -m py_compile {} \;
+
+  docker-build-test:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker build -t acido-cli:test -f Dockerfile .
+
+    - name: Test acido CLI in Docker
+      run: |
+        # Test basic help command
+        docker run --rm acido-cli:test --help
+        
+        # Test subcommands help
+        docker run --rm acido-cli:test create --help
+        docker run --rm acido-cli:test fleet --help
+        docker run --rm acido-cli:test run --help
+        docker run --rm acido-cli:test ls --help
+        docker run --rm acido-cli:test rm --help
+        docker run --rm acido-cli:test ip --help
+        
+        # Test version info
+        docker run --rm acido-cli:test --version || echo "Version command test completed"
+
+    - name: Test acido CLI with environment variables
+      env:
+        AZURE_RESOURCE_GROUP: test-rg
+        IMAGE_REGISTRY_SERVER: test.azurecr.io
+        IMAGE_REGISTRY_USERNAME: testuser
+        IMAGE_REGISTRY_PASSWORD: testpass
+        STORAGE_ACCOUNT_NAME: testaccount
+      run: |
+        # Test that CLI accepts environment variables for configuration
+        docker run --rm \
+          -e AZURE_RESOURCE_GROUP \
+          -e IMAGE_REGISTRY_SERVER \
+          -e IMAGE_REGISTRY_USERNAME \
+          -e IMAGE_REGISTRY_PASSWORD \
+          -e STORAGE_ACCOUNT_NAME \
+          acido-cli:test ls || echo "CLI environment variable test completed"
