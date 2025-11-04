@@ -103,25 +103,18 @@ Inspired by [axiom](https://github.com/pry0cc/axiom).
 
 **Prerequisites:**
 - Python 3.7+
-- Docker
 - Azure account ([free tier](https://azure.microsoft.com/free/) works)
 
-### Option 1: Quick Setup in Azure Cloud Shell (Recommended)
-
-The easiest way to set up acido is using the automated install script in Azure Cloud Shell. This script creates all required Azure resources with a single command.
+### Quick Setup in Azure Cloud Shell
 
 1. **Open Azure Cloud Shell:**
-   - Go to [Azure Portal](https://portal.azure.com)
-   - Click the Cloud Shell icon (>_) in the top navigation bar
-   - Choose Bash when prompted
+   - Go to [Azure Portal](https://portal.azure.com) and click the Cloud Shell icon (>_)
 
-2. **Upload and run the install script:**
+2. **Run the install script:**
    ```bash
-   # Download the install script
    curl -o install.sh https://raw.githubusercontent.com/merabytes/acido/main/install.sh
    chmod +x install.sh
    
-   # Run the script with your preferred configuration
    # Replace SUB_ID with your Azure Subscription ID
    ./install.sh \
      -s SUB_ID \
@@ -135,399 +128,103 @@ The easiest way to set up acido is using the automated install script in Azure C
      --create-rg
    ```
 
-   **What this creates:**
-   - Service Principal with appropriate permissions
-   - Azure Container Registry (ACR) for Docker images
-   - Storage Account with blob container for input/output files
-   - User Assigned Managed Identity (optional)
-   - Key Vault (optional with `-k` flag)
+   This creates: Service Principal, ACR, Storage Account, blob container, and generates a complete environment file.
 
-3. **Load environment variables:**
+3. **Load environment and install:**
    ```bash
    source acido.env
-   ```
-
-4. **Install acido:**
-   ```bash
    pip install acido
    ```
 
-5. **You're ready!** Skip the `az login` step - the environment variables are already configured.
-
-**Advanced options:**
-```bash
-# Least privilege mode (granular permissions instead of Contributor)
-./install.sh -s SUB -g acido-rg -l eastus -p acido -a acidocr -S acidostore \
-  --least-privilege --identity-name acido-id --emit-env-file acido.env
-
-# Include Key Vault for secrets management
-./install.sh -s SUB -g acido-rg -l eastus -p acido -S acidostore \
-  -k acidokv --kv-secret STORAGE_CONN="your-connection-string" --emit-env-file acido.env
-```
-
-For complete install.sh options, run: `./install.sh --help`
-
-### Option 2: Manual Setup
-
-**Setup:**
-
-1. Install acido:
-```bash
-pip install acido
-```
-
-2. Login to Azure:
-```bash
-az login
-```
-
-3. Create Azure Container Registry:
-```bash
-az acr create --resource-group MyResourceGroup --name myregistry --sku Basic
-```
-
-4. Configure acido:
-```bash
-acido -c
-# or
-acido configure
-```
-Provide: resource group name, registry server (e.g., `myregistry.azurecr.io`), registry username, registry password, and storage account name.
-
-**Note:** For CI/CD pipelines and Lambda deployments, you can use environment variables instead:
-- `AZURE_RESOURCE_GROUP`
-- `IMAGE_REGISTRY_SERVER`
-- `IMAGE_REGISTRY_USERNAME`
-- `IMAGE_REGISTRY_PASSWORD`
-- `STORAGE_ACCOUNT_NAME`
-- `STORAGE_ACCOUNT_KEY` (optional, if not provided will fetch from Azure)
-
-See [.github/AZURE_PERMISSIONS.md](.github/AZURE_PERMISSIONS.md) for detailed Service Principal setup and permissions.
+4. **You're ready!** All Azure credentials are configured via environment variables.
 
 ## Quick Start
 
-1. Create a target list (`targets.txt`):
-```
-facebook.com
-uber.com
-paypal.com
-```
-
-2. Create scanning image:
+1. **Create scanning image from GitHub:**
 ```bash
-# Using short name (will look for 'nmap' image)
-acido create nmap
-
-# Or specify the full Docker image URL
-acido create nuclei --image projectdiscovery/nuclei:latest
-
-# For images that run as non-root user (e.g., alpine/nikto)
-acido create nikto --image alpine/nikto:latest --root
-
-# Install additional packages during image creation
-acido create nikto --image alpine/nikto:latest --root --install python3 --install nmap
-
-# Or build from a GitHub repository (must contain a Dockerfile)
-acido create git+https://github.com/user/custom-scanner
-
-# With specific branch or tag
-acido create git+https://github.com/user/custom-scanner@main
-acido create git+https://github.com/user/custom-scanner@v1.0.0
+acido create https://github.com/projectdiscovery/nuclei
 ```
 
-3. Run distributed scan (Docker-like syntax):
+2. **Run distributed scan:**
 ```bash
-acido fleet nmap-scan \
-    -n 3 \
-    -im nmap \
-    -t 'nmap -iL input -p 0-1000' \
-    -i targets.txt \
-    -o output \
-    --rm-when-done
+echo -e "example.com\ntest.com" > targets.txt
+acido fleet nuclei-scan -n 3 -im nuclei -t 'nuclei -list input' -i targets.txt
 ```
 
-Or using the classic syntax (still supported):
+3. **Manage containers:**
 ```bash
-acido -f nmap-scan \
-    -n 3 \
-    -im nmap \
-    -t 'nmap -iL input -p 0-1000' \
-    -i targets.txt \
-    -o output \
-    --rm-when-done
+acido ls              # List all instances
+acido rm nuclei-scan  # Remove specific fleet
 ```
 
-Parameters:
-- `fleet` / `-f` Fleet name
-- `-n` Number of container instances
-- `-im` Image name (e.g., 'nmap', 'nuclei:latest', or full URL)
-- `-t` Command to execute
-- `-i` Input file (auto-split across containers)
-- `-o` Output file
-- `--rm-when-done` Auto-delete containers after completion
-
-Results saved to `output.json` and `all_output.txt`.
+4. **Manage IP addresses:**
+```bash
+acido ip create pentest-ip   # Create IPv4 address
+acido ip ls                  # List all IPs
+acido ip rm pentest-ip       # Remove IP address
+```
 
 ## CLI Reference
 
-Acido now supports Docker-like subcommands for a more intuitive experience:
-
-### Subcommands
+### Core Commands
 
 ```bash
-# Create acido-compatible image from base Docker image
-acido create <name> [--image <full-image-url>] [--root] [--install <package>] [--no-update]
+# Create images
+acido create https://github.com/projectdiscovery/nuclei
+acido create nmap --image nmap:latest
 
-# Create acido-compatible image from GitHub repository (must contain Dockerfile)
-acido create git+https://github.com/user/repo[@ref]
+# Deploy fleet
+acido fleet <name> -n <count> -im <image> -t '<command>' -i <input-file>
 
-# Configure acido
-acido configure
+# Manage containers
+acido ls                    # List all instances
+acido rm <name>             # Remove instances
 
-# Deploy a fleet of containers
-acido fleet <fleet-name> [options]
-
-# Run a single ephemeral container with auto-cleanup
-acido run <name> [options]
-
-# List all container instances
-acido ls
-
-# Remove container instances
-acido rm <name-or-pattern>
-
-# IP address management
-acido ip create <name>    # Create IPv4 address and network profile
-acido ip ls               # List all IPv4 addresses
-acido ip rm <name>        # Remove IPv4 address and network profile
-acido ip select           # Select an IPv4 address to use
-
-# Select instances by pattern
-acido select <pattern>
-
-# Execute command on selected instances  
-acido exec <command> [options]
+# Manage IP addresses
+acido ip create <name>      # Create IPv4 address
+acido ip ls                 # List all IPs
+acido ip rm <name>          # Remove IP
+acido ip select             # Select IP interactively
 ```
-
-### Create Command Options
-
-```bash
-acido create <name> [options]
-
-Options:
-  --image IMAGE_URL           Full Docker image URL (e.g., 'projectdiscovery/nuclei:latest')
-  --install PACKAGE           Install additional package (can be used multiple times)
-  --no-update                 Skip package list update before installing packages
-  --root                      Run as root user (for images that default to non-root)
-  --use-venv                  Use Python virtual environment (larger image, more flexible)
-  --break-system-packages     [Deprecated] Use --use-venv instead (kept for compatibility)
-  --entrypoint ENTRYPOINT     Override default ENTRYPOINT (e.g., "/bin/bash")
-  --cmd CMD                   Override default CMD (e.g., "sleep infinity")
-
-Examples:
-  # Create from base image (uses pre-built binary - lightweight)
-  acido create nmap --image nmap:latest
-  
-  # Create with root privileges (for non-root images like alpine/nikto)
-  acido create nikto --image alpine/nikto:latest --root
-  
-  # Install additional packages
-  acido create custom --image alpine:latest --root --install python3 --install nmap
-  
-  # Create nuclei image with pre-built binary (default, lightweight)
-  acido create nuclei --image projectdiscovery/nuclei:latest
-  
-  # Create nuclei image with virtual environment (larger but more flexible)
-  acido create nuclei --image projectdiscovery/nuclei:latest --use-venv
-  
-  # Custom entrypoint and command
-  acido create ubuntu --image ubuntu:20.04 --entrypoint "/bin/bash" --cmd "echo hello"
-  
-  # Build from GitHub repository
-  acido create git+https://github.com/user/repo@main
-```
-
-### Fleet Command Options
-
-```bash
-acido fleet <fleet-name> [options]
-
-Options:
-  -n, --num-instances NUM   Number of container instances
-  -im, --image IMAGE        Image name (e.g., 'nmap', 'nuclei:latest')
-  -t, --task TASK          Command to execute
-  -i, --input-file FILE    Input file (auto-split across containers)
-  -w, --wait SECONDS       Max timeout in seconds
-  -o, --output FILE        Save output to file
-  --format FORMAT          Output format: txt or json (default: txt)
-  -q, --quiet              Quiet mode with progress bar
-  --rm-when-done          Remove containers after completion
-```
-
-### Legacy Flags (Still Supported)
-
-For backward compatibility, all original flags are still supported:
-
-```
-usage: acido [-h] [-c] [-f FLEET] [-im IMAGE_NAME] [--create-ip CREATE_IP] 
-             [--ip] [-n NUM_INSTANCES] [-t TASK] [-e EXEC_CMD] 
-             [-i INPUT_FILE] [-w WAIT] [-s SELECT] [-l] [-r REMOVE] [-in]
-             [-sh SHELL] [-d DOWNLOAD_INPUT] [-o WRITE_TO_FILE] [-rwd]
-             {create,configure,fleet,ls,rm,select,exec}
-
-positional arguments:
-  {create,configure,fleet,ls,rm,select,exec}
-                        Subcommands
-
-optional arguments:
-  -h, --help            Show help message
-  -c, --config          Configure acido
-  -f FLEET              Fleet name (deprecated: use 'acido fleet' subcommand)
-  -im IMAGE_NAME        Deploy specific image
-  --create IMAGE        Create acido-compatible image (alternative syntax)
-  --create-ip NAME      Create IPv4 address for routing
-  --ip                  Use existing IPv4 address
-  -n NUM                Number of instances
-  -t TASK               Command to execute
-  -e EXEC_CMD           Execute on selected instances
-  -i INPUT_FILE         Input file for task
-  -w WAIT               Max timeout
-  -s SELECT             Select instances by name/regex
-  -l, --list            List all instances (deprecated: use 'acido ls')
-  -r REMOVE             Remove instances by name/regex (deprecated: use 'acido rm')
-  -in, --interactive    Interactive session
-  -sh SHELL             Execute and upload to blob
-  -d DOWNLOAD           Download from blob
-  -o OUTPUT             Save output in JSON
-  -rwd, --rm-when-done  Remove containers after completion
-```
-
 
 ## Examples
 
-### Distributed Nmap Scan
-
-Scan 1,000 hosts with 20 containers using new Docker-like syntax:
+### Distributed Scanning
 
 ```bash
-acido fleet nmap-fleet \
-    -n 20 \
-    -im nmap \
-    -t 'nmap -iL input -p- --min-rate 1000' \
-    -i targets.txt \
-    -o output \
-    --rm-when-done
+# Nuclei scan across 10 containers
+acido fleet nuclei-scan -n 10 -im nuclei -t 'nuclei -list input' -i urls.txt
+
+# Nmap scan with auto-cleanup
+acido fleet nmap-scan -n 5 -im nmap -t 'nmap -iL input -p-' -i targets.txt --rm-when-done
 ```
 
-Or using classic syntax:
-```bash
-acido -f nmap-fleet \
-    -n 20 \
-    -im nmap \
-    -t 'nmap -iL input -p- --min-rate 1000' \
-    -i targets.txt \
-    -o output \
-    --rm-when-done
-```
-
-### Nuclei Vulnerability Scan
-
-Scan 10,000 URLs with 50 containers:
+### Container Management
 
 ```bash
-acido fleet nuclei-scan \
-    -n 50 \
-    -im nuclei \
-    -t 'nuclei -list input -t /nuclei-templates/' \
-    -i urls.txt \
-    -o results
-```
-
-### Masscan Port Discovery
-
-Scan entire network with 100 containers:
-
-```bash
-acido fleet masscan \
-    -n 100 \
-    -im masscan \
-    -t 'masscan -iL input -p0-65535 --rate 10000' \
-    -i networks.txt \
-    -o masscan-results
-```
-
-### Fleet Management
-
-List all running container instances:
-```bash
+# List all running instances
 acido ls
-```
 
-Remove specific fleet:
-```bash
-acido rm nmap-fleet
-```
+# Remove specific fleet
+acido rm nuclei-scan
 
-Remove all fleets matching pattern:
-```bash
+# Remove all matching pattern
 acido rm 'scan-*'
 ```
 
-### Building from GitHub
-
-Build custom acido-compatible images directly from GitHub repositories containing Dockerfiles:
+### IP Address Routing
 
 ```bash
-# Build from main branch
-acido create git+https://github.com/myorg/custom-scanner
-
-# Build from specific branch
-acido create git+https://github.com/myorg/custom-scanner@develop
-
-# Build from specific tag
-acido create git+https://github.com/myorg/custom-scanner@v2.1.0
-
-# Build from specific commit
-acido create git+https://github.com/myorg/custom-scanner@abc123def456
-```
-
-**Requirements:**
-- Repository must contain a `Dockerfile` at the root
-- Git must be installed locally
-- Image will be built and pushed to your Azure Container Registry
-
-**Example workflow:**
-1. Create a GitHub repository with your custom Dockerfile
-2. Build the image: `acido create git+https://github.com/myorg/scanner@v1.0`
-3. Use the image: `acido fleet scan -n 10 -im scanner-acido:v1-0 -t 'your-command'`
-
-**Note:** The `--install` option is not supported for GitHub URLs since the Dockerfile defines all dependencies.
-
-### Single IP Routing
-
-Route all containers through one IP for whitelisting:
-
-```bash
-# Create IP address and network profile
+# Create and use static IP
 acido ip create pentest-ip
-
-# List all IPv4 addresses
-acido ip ls
-
-# Select IP address interactively
 acido ip select
 
-# Deploy with IP routing
-acido fleet scan -n 50 \
-    -im nmap \
-    -t 'nmap -iL input -p-' \
-    -i targets.txt
+# Deploy with IP routing (containers use selected IP)
+acido fleet scan -n 10 -im nmap -t 'nmap -iL input' -i targets.txt
 
-# Remove IP address when done
+# Cleanup
 acido ip rm pentest-ip
 ```
-
-**Note:** The old syntax (`acido --create-ip <name>` and `acido --ip`) is still supported for backward compatibility.
 
 ## Docker Usage
 

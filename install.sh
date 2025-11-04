@@ -319,14 +319,17 @@ ensure_acr() {
     [[ -z "$LOCATION" ]] && die "Need --location to create ACR."
     info "Creating ACR '$ACR_NAME'..."
     az acr create --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" \
-      --location "$LOCATION" --sku Standard --admin-enabled false \
+      --location "$LOCATION" --sku Standard --admin-enabled true \
       --tags project="$TAG_PROJECT" 1>/dev/null
   else
     info "ACR '$ACR_NAME' exists."
+    # Enable admin if not already enabled
+    az acr update --name "$ACR_NAME" --admin-enabled true 1>/dev/null 2>&1 || true
   fi
   ACR_ID="$(az acr show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query id -o tsv)"
-  info "Assigning AcrPull."
+  info "Assigning AcrPull and AcrPush roles."
   az role assignment create --assignee "$SP_OBJECT_ID" --role "AcrPull" --scope "$ACR_ID" 1>/dev/null || true
+  az role assignment create --assignee "$SP_OBJECT_ID" --role "AcrPush" --scope "$ACR_ID" 1>/dev/null || true
 }
 
 ###############################################################################
@@ -437,11 +440,35 @@ emit_env() {
     echo "export AZURE_RESOURCE_GROUP=\"$RESOURCE_GROUP\""
     echo "export AZURE_CLIENT_ID=\"$APP_ID\""
     echo "export AZURE_TENANT_ID=\"$(az account show --query tenantId -o tsv)\""
-    [[ -n "$ACR_NAME" ]] && echo "export AZURE_ACR_NAME=\"$ACR_NAME\""
-    [[ -n "$STORAGE_ACCOUNT_NAME" ]] && echo "export STORAGE_ACCOUNT_NAME=\"$STORAGE_ACCOUNT_NAME\""
+    
+    # ACR credentials
+    if [[ -n "$ACR_NAME" ]]; then
+      echo "export AZURE_ACR_NAME=\"$ACR_NAME\""
+      echo "export IMAGE_REGISTRY_SERVER=\"${ACR_NAME}.azurecr.io\""
+      
+      # Get ACR credentials
+      local acr_username acr_password
+      acr_username="$(az acr credential show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query username -o tsv 2>/dev/null || echo "$ACR_NAME")"
+      acr_password="$(az acr credential show --name "$ACR_NAME" --resource-group "$RESOURCE_GROUP" --query 'passwords[0].value' -o tsv 2>/dev/null || echo "")"
+      
+      echo "export IMAGE_REGISTRY_USERNAME=\"$acr_username\""
+      [[ -n "$acr_password" ]] && echo "export IMAGE_REGISTRY_PASSWORD=\"$acr_password\""
+    fi
+    
+    # Storage Account details
+    if [[ -n "$STORAGE_ACCOUNT_NAME" ]]; then
+      echo "export STORAGE_ACCOUNT_NAME=\"$STORAGE_ACCOUNT_NAME\""
+      
+      # Get storage account key
+      local storage_key
+      storage_key="$(az storage account keys list --account-name "$STORAGE_ACCOUNT_NAME" --resource-group "$RESOURCE_GROUP" --query '[0].value' -o tsv 2>/dev/null || echo "")"
+      [[ -n "$storage_key" ]] && echo "export STORAGE_ACCOUNT_KEY=\"$storage_key\""
+    fi
+    
     [[ -n "$STORAGE_CONTAINER_NAME" ]] && echo "export STORAGE_CONTAINER_NAME=\"$STORAGE_CONTAINER_NAME\""
-    [[ -n "$ID_CLIENT_ID" ]] && echo "export IDENTITY_CLIENT_ID=\"$ID_CLIENT_ID\""
-    [[ -n "$KV_NAME" ]] && echo "export KEYVAULT_NAME=\"$KV_NAME\""
+    [[ -n "$ID_CLIENT_ID" ]] && echo "export MANAGED_IDENTITY_CLIENT_ID=\"$ID_CLIENT_ID\""
+    [[ -n "$KV_NAME" ]] && echo "export KEY_VAULT_NAME=\"$KV_NAME\""
+    
     if $GENERATE_CLIENT_SECRET && [[ -n "${GENERATED_CLIENT_SECRET:-}" ]]; then
       echo "export AZURE_CLIENT_SECRET=\"$GENERATED_CLIENT_SECRET\""
     fi
