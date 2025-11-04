@@ -12,10 +12,8 @@
 # This script builds the acido CLI Docker image from a specific branch/tag/commit
 # of the GitHub repository.
 
-set -e
-
 # Default to main branch if no argument provided
-BRANCH="${1:-main}"
+BRANCH="$(git branch --show-current)"
 
 echo "=============================================="
 echo "Building acido Docker image from GitHub"
@@ -24,17 +22,11 @@ echo "Branch/Tag: $BRANCH"
 echo "=============================================="
 
 # Create a temporary directory
-TEMP_DIR=$(mktemp -d)
-echo "Created temporary directory: $TEMP_DIR"
-
-# Clone the repository
-echo "Cloning repository..."
-git clone --depth 1 --branch "$BRANCH" https://github.com/merabytes/acido.git "$TEMP_DIR"
+git pull
 
 # Build the Docker image
 echo "Building Docker image..."
-cd "$TEMP_DIR"
-docker build -t "acido-cli:${BRANCH}" -f Dockerfile .
+docker build . -t "acido:latest"
 
 # Clean up
 echo "Cleaning up temporary directory..."
@@ -45,7 +37,7 @@ echo "Build completed successfully!"
 echo "Image name: acido-cli:${BRANCH}"
 echo ""
 echo "Usage examples:"
-echo "  docker run --rm acido-cli:${BRANCH} --help"
-echo "  docker run --rm acido-cli:${BRANCH} create --help"
-echo "  docker run --rm acido-cli:${BRANCH} fleet --help"
+echo "  docker run --rm acido --help"
+echo "  docker run --rm acido create --help"
+echo "  docker run --rm acido fleet --help"
 echo "=============================================="
