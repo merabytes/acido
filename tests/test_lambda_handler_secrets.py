@@ -994,7 +994,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Future expiration time
         from datetime import datetime, timedelta, timezone
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
-        expires_at = future_time.isoformat()
+        expires_at = int(future_time.timestamp())
         
         event = {
             'action': 'create',
@@ -1027,7 +1027,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Past expiration time
         from datetime import datetime, timedelta, timezone
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
-        expires_at = past_time.isoformat()
+        expires_at = int(past_time.timestamp())
         
         event = {
             'action': 'create',
@@ -1081,8 +1081,9 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Past expiration time
         from datetime import datetime, timedelta, timezone
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
+        expires_at_unix = int(past_time.timestamp())
         mock_vault_manager.get_secret.side_effect = lambda key: {
-            'test-uuid-expires': past_time.isoformat(),
+            'test-uuid-expires': str(expires_at_unix),
             'test-uuid-metadata': 'plaintext',
             'test-uuid': 'secret-value'
         }.get(key, None)
@@ -1101,6 +1102,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertIn('error', body)
         self.assertIn('expired', body['error'].lower())
         self.assertIn('expired_at', body)
+        self.assertEqual(body['expired_at'], expires_at_unix)
         
         # Verify secret was deleted
         self.assertTrue(mock_vault_manager.delete_secret.called)
@@ -1118,8 +1120,9 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Future expiration time
         from datetime import datetime, timedelta, timezone
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
+        expires_at_unix = int(future_time.timestamp())
         mock_vault_manager.get_secret.side_effect = lambda key: {
-            'test-uuid-expires': future_time.isoformat(),
+            'test-uuid-expires': str(expires_at_unix),
             'test-uuid-metadata': 'plaintext',
             'test-uuid': 'secret-value'
         }.get(key, None)
@@ -1151,8 +1154,9 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Past expiration time
         from datetime import datetime, timedelta, timezone
         past_time = datetime.now(timezone.utc) - timedelta(hours=1)
+        expires_at_unix = int(past_time.timestamp())
         mock_vault_manager.get_secret.side_effect = lambda key: {
-            'test-uuid-expires': past_time.isoformat(),
+            'test-uuid-expires': str(expires_at_unix),
             'test-uuid-metadata': 'plaintext',
             'test-uuid': 'secret-value'
         }.get(key, None)
@@ -1184,9 +1188,9 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         # Future expiration time
         from datetime import datetime, timedelta, timezone
         future_time = datetime.now(timezone.utc) + timedelta(hours=1)
-        expires_at = future_time.isoformat()
+        expires_at_unix = int(future_time.timestamp())
         mock_vault_manager.get_secret.side_effect = lambda key: {
-            'test-uuid-expires': expires_at,
+            'test-uuid-expires': str(expires_at_unix),
             'test-uuid-metadata': 'plaintext',
             'test-uuid': 'secret-value'
         }.get(key, None)
@@ -1203,7 +1207,7 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         self.assertEqual(response['statusCode'], 200)
         body = json.loads(response['body'])
         self.assertIn('expires_at', body)
-        self.assertEqual(body['expires_at'], expires_at)
+        self.assertEqual(body['expires_at'], expires_at_unix)
 
 
 if __name__ == '__main__':
