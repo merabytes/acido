@@ -1070,6 +1070,31 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
 
     @patch('lambda_handler_secrets.VaultManager')
     @patch('lambda_handler_secrets.validate_turnstile')
+    def test_create_secret_with_invalid_timestamp_range(self, mock_validate_turnstile, mock_vault_manager_class):
+        """Test creating a secret with timestamp outside valid range fails."""
+        mock_validate_turnstile.return_value = True
+        
+        mock_vault_manager = MagicMock()
+        mock_vault_manager_class.return_value = mock_vault_manager
+        
+        # Timestamp that would cause OSError (way too large)
+        event = {
+            'action': 'create',
+            'secret': 'test-secret',
+            'expires_at': 99999999999999999,  # Year 3.1 billion+
+            'turnstile_token': 'test-token'
+        }
+        context = {}
+        
+        response = lambda_handler(event, context)
+        
+        self.assertEqual(response['statusCode'], 400)
+        body = json.loads(response['body'])
+        self.assertIn('error', body)
+        self.assertIn('Invalid expires_at format', body['error'])
+
+    @patch('lambda_handler_secrets.VaultManager')
+    @patch('lambda_handler_secrets.validate_turnstile')
     def test_retrieve_expired_secret(self, mock_validate_turnstile, mock_vault_manager_class):
         """Test retrieving an expired secret returns 410 and deletes it."""
         mock_validate_turnstile.return_value = True

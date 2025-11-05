@@ -71,7 +71,7 @@ def _handle_create_secret(event, vault_manager):
                     'expires_at must be in the future',
                     headers=CORS_HEADERS
                 )
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, OSError) as e:
             return build_error_response(
                 f'Invalid expires_at format. Expected UNIX timestamp (integer): {str(e)}',
                 headers=CORS_HEADERS
