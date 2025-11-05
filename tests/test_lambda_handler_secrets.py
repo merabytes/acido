@@ -21,7 +21,7 @@ finally:
     sys.argv = _original_argv
 
 # Test constants
-INVALID_LARGE_TIMESTAMP = 99999999999999999  # Year 3.1 billion+ - outside valid range
+INVALID_LARGE_TIMESTAMP = 99999999999999999  # Extremely large timestamp beyond practical range
 
 
 class TestLambdaHandlerSecrets(unittest.TestCase):
