@@ -47,7 +47,7 @@ def _handle_create_secret(event, vault_manager):
     """Handle secret creation action."""
     secret_value = event.get('secret')
     password = event.get('password')
-    expires_at = event.get('expires_at')  # Optional expiration timestamp (ISO 8601 format)
+    expires_at = event.get('expires_at')  # Optional expiration timestamp (UNIX timestamp)
     
     if not secret_value:
         return build_error_response(
@@ -57,10 +57,14 @@ def _handle_create_secret(event, vault_manager):
     
     # Validate expires_at if provided
     expiration_datetime = None
+    expiration_unix = None
     if expires_at:
         try:
-            # Parse ISO 8601 timestamp
-            expiration_datetime = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+            # Parse UNIX timestamp (integer or string)
+            expiration_unix = int(expires_at)
+            # OSError can be raised for timestamps outside platform's valid range
+            # (typically 1970-2038 on 32-bit systems, much larger on 64-bit systems)
+            expiration_datetime = datetime.fromtimestamp(expiration_unix, tz=timezone.utc)
             
             # Ensure the expiration is in the future
             now = datetime.now(timezone.utc)
@@ -69,9 +73,9 @@ def _handle_create_secret(event, vault_manager):
                     'expires_at must be in the future',
                     headers=CORS_HEADERS
                 )
-        except (ValueError, AttributeError) as e:
+        except (ValueError, TypeError, OSError) as e:
             return build_error_response(
-                f'Invalid expires_at format. Expected ISO 8601 format (e.g., "2024-12-31T23:59:59Z"): {str(e)}',
+                f'Invalid expires_at format. Expected UNIX timestamp (integer): {str(e)}',
                 headers=CORS_HEADERS
             )
     
@@ -100,18 +104,18 @@ def _handle_create_secret(event, vault_manager):
     vault_manager.set_secret(metadata_key, "encrypted" if is_encrypted_flag else "plaintext")
     
     # Store expiration metadata if provided
-    if expiration_datetime:
+    if expiration_unix:
         expires_key = f"{secret_uuid}-expires"
-        # Store as ISO 8601 string for easy parsing
-        vault_manager.set_secret(expires_key, expiration_datetime.isoformat())
+        # Store as UNIX timestamp string for consistency
+        vault_manager.set_secret(expires_key, str(expiration_unix))
     
     # Return success response with UUID
     response_data = {
         'uuid': secret_uuid,
         'message': 'Secret created successfully'
     }
-    if expiration_datetime:
-        response_data['expires_at'] = expiration_datetime.isoformat()
+    if expiration_unix:
+        response_data['expires_at'] = expiration_unix
     
     return build_response(201, response_data, CORS_HEADERS)
 
@@ -137,7 +141,8 @@ def _handle_retrieve_secret(event, vault_manager):
     expires_key = f"{secret_uuid}-expires"
     try:
         expires_at_str = vault_manager.get_secret(expires_key)
-        expires_at = datetime.fromisoformat(expires_at_str)
+        expires_at_unix = int(expires_at_str)
+        expires_at = datetime.fromtimestamp(expires_at_unix, tz=timezone.utc)
         now = datetime.now(timezone.utc)
         
         if now >= expires_at:
@@ -154,7 +159,7 @@ def _handle_retrieve_secret(event, vault_manager):
             
             return build_response(410, {
                 'error': 'Secret has expired and has been deleted',
-                'expired_at': expires_at.isoformat()
+                'expired_at': expires_at_unix
             }, CORS_HEADERS)
     except Exception:
         # No expiration metadata means secret doesn't expire
@@ -227,11 +232,12 @@ def _handle_check_secret(event, vault_manager):
     
     # Check if secret has expired
     expires_key = f"{secret_uuid}-expires"
-    expires_at_str = None
+    expires_at_unix = None
     is_expired = False
     try:
         expires_at_str = vault_manager.get_secret(expires_key)
-        expires_at = datetime.fromisoformat(expires_at_str)
+        expires_at_unix = int(expires_at_str)
+        expires_at = datetime.fromtimestamp(expires_at_unix, tz=timezone.utc)
         now = datetime.now(timezone.utc)
         
         if now >= expires_at:
@@ -249,7 +255,7 @@ def _handle_check_secret(event, vault_manager):
             
             return build_response(410, {
                 'error': 'Secret has expired and has been deleted',
-                'expired_at': expires_at.isoformat()
+                'expired_at': expires_at_unix
             }, CORS_HEADERS)
     except Exception:
         # No expiration metadata means secret doesn't expire
@@ -270,8 +276,8 @@ def _handle_check_secret(event, vault_manager):
         'encrypted': encrypted,
         'requires_password': encrypted
     }
-    if expires_at_str:
-        response_data['expires_at'] = expires_at_str
+    if expires_at_unix:
+        response_data['expires_at'] = expires_at_unix
     
     return build_response(200, response_data, CORS_HEADERS)
 
@@ -285,7 +291,7 @@ def lambda_handler(event, context):
         "action": "create",
         "secret": "my-secret-value",
         "password": "optional-password-for-encryption",
-        "expires_at": "optional-expiration-timestamp-iso8601",
+        "expires_at": 1735689599,
         "turnstile_token": "cloudflare-turnstile-token"
     }
     
@@ -315,7 +321,7 @@ def lambda_handler(event, context):
             "action": "create",
             "secret": "my-secret-value",
             "password": "optional-password-for-encryption",
-            "expires_at": "2024-12-31T23:59:59Z",
+            "expires_at": 1735689599,
             "turnstile_token": "cloudflare-turnstile-token"
         }
     }
@@ -337,7 +343,7 @@ def lambda_handler(event, context):
     
     Time-based expiration:
     - If "expires_at" is provided during creation, the secret will expire at that time
-    - Format: ISO 8601 timestamp (e.g., "2024-12-31T23:59:59Z")
+    - Format: UNIX timestamp (seconds since epoch, e.g., 1735689599)
     - Expired secrets are automatically deleted when accessed
     - If no expiration is provided, the secret never expires (backward compatible)
     
