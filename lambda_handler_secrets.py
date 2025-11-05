@@ -62,6 +62,7 @@ def _handle_create_secret(event, vault_manager):
         try:
             # Parse UNIX timestamp (integer or string)
             expiration_unix = int(expires_at)
+            # OSError can be raised for timestamps outside platform's valid range
             expiration_datetime = datetime.fromtimestamp(expiration_unix, tz=timezone.utc)
             
             # Ensure the expiration is in the future

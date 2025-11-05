@@ -20,6 +20,9 @@ finally:
     # Restore original argv
     sys.argv = _original_argv
 
+# Test constants
+INVALID_LARGE_TIMESTAMP = 99999999999999999  # Year 3.1 billion+ - outside valid range
+
 
 class TestLambdaHandlerSecrets(unittest.TestCase):
     """Test cases for the Lambda secrets handler function."""
@@ -1077,11 +1080,10 @@ class TestLambdaHandlerSecrets(unittest.TestCase):
         mock_vault_manager = MagicMock()
         mock_vault_manager_class.return_value = mock_vault_manager
         
-        # Timestamp that would cause OSError (way too large)
         event = {
             'action': 'create',
             'secret': 'test-secret',
-            'expires_at': 99999999999999999,  # Year 3.1 billion+
+            'expires_at': INVALID_LARGE_TIMESTAMP,
             'turnstile_token': 'test-token'
         }
         context = {}
