@@ -106,7 +106,7 @@ acido-client ip-rm --name pentest-ip
 
 ## Requirements
 
-- Python 3.7 or higher
+- Python 3.8 or higher
 - requests >= 2.25.0
 
 ## Examples

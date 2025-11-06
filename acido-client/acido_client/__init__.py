@@ -7,6 +7,6 @@ via REST API, supporting all operations including fleet, run, ls, rm, and IP man
 
 __version__ = '0.40.2'
 
-from .client import AcidoClient
+from .client import AcidoClient, AcidoClientError
 
-__all__ = ['AcidoClient']
+__all__ = ['AcidoClient', 'AcidoClientError']

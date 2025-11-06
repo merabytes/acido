@@ -313,8 +313,14 @@ class AcidoClient:
         return self._make_request(payload)
     
     def close(self):
-        """Close the HTTP session."""
-        self.session.close()
+        """Close the HTTP session. Safe to call multiple times."""
+        if hasattr(self, 'session') and self.session is not None:
+            try:
+                self.session.close()
+            except Exception:
+                pass  # Ignore errors during cleanup
+            finally:
+                self.session = None
     
     def __enter__(self):
         """Context manager entry."""
