@@ -1,5 +1,8 @@
 name: Publish to PyPI
 
+# This workflow publishes the MAIN acido package only.
+# For acido-client package publishing, see publish-client.yml
+
 on:
   push:
     tags:

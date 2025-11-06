@@ -4,9 +4,17 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'acido-client/**'
+      - '.github/workflows/ci-client.yml'
+      - '.github/workflows/publish-client.yml'
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - 'acido-client/**'
+      - '.github/workflows/ci-client.yml'
+      - '.github/workflows/publish-client.yml'
   workflow_dispatch:
 
 env:

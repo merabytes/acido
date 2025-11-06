@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "acido-client"
+version = "0.40.2"
+description = "REST API client for acido Lambda functions"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Xavier Álvarez", email = "xalvarez@merabytes.com"}
+]
+keywords = ["Security", "Cloud Computing", "Red Team", "Pentesting", "API Client"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Natural Language :: English",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "requests>=2.25.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/merabytes/acido"
+Repository = "https://github.com/merabytes/acido"
+Issues = "https://github.com/merabytes/acido/issues"
+
+[project.scripts]
+acido-client = "acido_client.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["acido_client*"]
+exclude = ["tests*"]

@@ -1,0 +1,73 @@
+name: Publish acido-client to PyPI
+
+# This workflow publishes the ACIDO-CLIENT package only.
+# For main acido package publishing, see publish.yml
+# Both packages share the same version number for consistency.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish-client:
+    name: Build and Publish acido-client to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel build twine
+
+    - name: Build distribution packages
+      run: |
+        cd acido-client
+        python -m build
+
+    - name: Check version consistency
+      run: |
+        # Get version from main acido package
+        ACIDO_VERSION=$(grep "version=" setup.py | cut -d"'" -f2)
+        echo "Main acido version: $ACIDO_VERSION"
+        
+        # Get version from acido-client package
+        CLIENT_VERSION=$(grep "version=" acido-client/setup.py | cut -d"'" -f2)
+        echo "acido-client version: $CLIENT_VERSION"
+        
+        # Check if versions match
+        if [ "$ACIDO_VERSION" != "$CLIENT_VERSION" ]; then
+          echo "::error::Version mismatch! Main acido has $ACIDO_VERSION but acido-client has $CLIENT_VERSION"
+          exit 1
+        fi
+        
+        # Check tag version if this is a tag push
+        if [ "${{ github.event_name }}" = "push" ]; then
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "Tag version: $TAG_VERSION"
+          if [ "$TAG_VERSION" != "$ACIDO_VERSION" ]; then
+            echo "::error::Version mismatch! Tag is v$TAG_VERSION but packages have $ACIDO_VERSION"
+            exit 1
+          fi
+        fi
+
+    - name: Publish to PyPI
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN_CLIENT }}
+      run: |
+        cd acido-client
+        python -m twine upload dist/*

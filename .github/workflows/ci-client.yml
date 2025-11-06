@@ -1,0 +1,171 @@
+name: CI Tests - acido-client
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'acido-client/**'
+      - '.github/workflows/ci-client.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'acido-client/**'
+      - '.github/workflows/ci-client.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test acido-client on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        cd acido-client
+        pip install -e .
+        pip install pytest pytest-cov
+
+    - name: Verify acido-client installation
+      run: |
+        python -c "from acido_client import __version__; print('acido-client version:', __version__)"
+        python -c "from acido_client import AcidoClient; print('AcidoClient loaded successfully')"
+
+    - name: Check version consistency
+      run: |
+        # Get version from main acido package
+        ACIDO_VERSION=$(grep "version=" setup.py | cut -d"'" -f2)
+        echo "Main acido version: $ACIDO_VERSION"
+        
+        # Get version from acido-client package
+        CLIENT_VERSION=$(grep "version=" acido-client/setup.py | cut -d"'" -f2)
+        echo "acido-client version: $CLIENT_VERSION"
+        
+        # Get version from acido_client/__init__.py
+        INIT_VERSION=$(grep "__version__" acido-client/acido_client/__init__.py | cut -d"'" -f2)
+        echo "acido_client/__init__.py version: $INIT_VERSION"
+        
+        # Check if versions match
+        if [ "$ACIDO_VERSION" != "$CLIENT_VERSION" ]; then
+          echo "::error::Version mismatch! Main acido has $ACIDO_VERSION but acido-client has $CLIENT_VERSION"
+          exit 1
+        fi
+        
+        if [ "$CLIENT_VERSION" != "$INIT_VERSION" ]; then
+          echo "::error::Version mismatch! setup.py has $CLIENT_VERSION but __init__.py has $INIT_VERSION"
+          exit 1
+        fi
+
+    - name: Test acido-client imports
+      run: |
+        python -c "from acido_client import AcidoClient"
+        python -c "from acido_client.client import AcidoClient, AcidoClientError"
+        python -c "from acido_client.cli import main, create_parser"
+
+    - name: Test CLI help
+      run: |
+        cd acido-client
+        python -m acido_client.cli --help
+        python -m acido_client.cli fleet --help
+        python -m acido_client.cli run --help
+        python -m acido_client.cli ls --help
+        python -m acido_client.cli rm --help
+        python -m acido_client.cli ip-create --help
+        python -m acido_client.cli ip-ls --help
+        python -m acido_client.cli ip-rm --help
+
+    - name: Run Python syntax check
+      run: |
+        cd acido-client
+        python -m py_compile acido_client/*.py
+
+    - name: Run unit tests
+      run: |
+        cd acido-client
+        python -m pytest tests/ -v --cov=acido_client --cov-report=term-missing
+
+  build-test:
+    name: Build and Install Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Build distribution
+      run: |
+        python -m pip install --upgrade pip setuptools wheel build
+        cd acido-client
+        python -m build
+
+    - name: Install from wheel
+      run: |
+        cd acido-client
+        pip install dist/*.whl
+
+    - name: Verify installation
+      run: |
+        python -c "from acido_client import __version__; print('Successfully installed acido-client version:', __version__)"
+        acido-client --help
+        acido-client --version
+
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install linting tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8
+
+    - name: Run flake8
+      continue-on-error: true
+      run: |
+        cd acido-client
+        # Stop the build if there are Python syntax errors or undefined names
+        flake8 acido_client --count --select=E9,F63,F7,F82 --show-source --statistics
+        # Exit-zero treats all errors as warnings
+        flake8 acido_client --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Check code structure
+      run: |
+        cd acido-client
+        # Verify all Python files are valid
+        find acido_client -name "*.py" -exec python -m py_compile {} \;

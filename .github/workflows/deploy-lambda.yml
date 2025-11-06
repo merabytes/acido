@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'acido-client/**'
+      - '.github/workflows/ci-client.yml'
+      - '.github/workflows/publish-client.yml'
+      - 'README.md'
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
 
 env:
