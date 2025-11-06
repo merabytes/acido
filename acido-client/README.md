@@ -96,6 +96,40 @@ acido-client ip-rm --name pentest-ip
 - **ip_ls**: List all IPv4 addresses
 - **ip_rm**: Remove IPv4 address and network profile
 
+## Features
+
+- **Lightweight**: Minimal dependencies (only `requests`)
+- **Independent**: Completely independent from the main acido package
+- **Complete**: Supports all 7 Lambda operations
+- **Easy to use**: Simple Python API and CLI
+- **Context manager support**: Can be used with Python's `with` statement
+
+## Requirements
+
+- Python 3.7 or higher
+- requests >= 2.25.0
+
+## Examples
+
+See the [examples](examples/) directory for more usage examples.
+
+## Development
+
+To install in development mode:
+
+```bash
+cd acido-client
+pip install -e .
+```
+
+To run tests:
+
+```bash
+cd acido-client
+pip install pytest pytest-cov
+pytest tests/ -v
+```
+
 ## License
 
 MIT
