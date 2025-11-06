@@ -6,10 +6,15 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   publish-client:
     name: Build and Publish acido-client to PyPI
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     
     steps:
     - name: Checkout code
