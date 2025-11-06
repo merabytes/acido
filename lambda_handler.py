@@ -25,6 +25,30 @@ def _validate_targets(targets):
     return targets and isinstance(targets, list)
 
 
+def _normalize_regions(event):
+    """
+    Normalize regions parameter from event.
+    
+    Supports both 'regions' (list) and 'region' (string) for backward compatibility.
+    Converts strings to lists and handles None/missing values.
+    
+    Args:
+        event: Lambda event dictionary
+        
+    Returns:
+        list: List of regions (defaults to ['westeurope'] if not specified)
+    """
+    # Try 'regions' first (new format), then fall back to 'region' (old format)
+    regions = event.get('regions', event.get('region', None))
+    
+    if regions is None:
+        return ['westeurope']
+    elif isinstance(regions, str):
+        return [regions]
+    else:
+        return regions
+
+
 def _create_input_file(targets):
     """Create temporary input file with targets."""
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as f:
@@ -282,13 +306,7 @@ def lambda_handler(event, context):
             task = event.get('task')
             duration = event.get('duration', 900)  # Default 15 minutes
             cleanup = event.get('cleanup', True)  # Default to auto-cleanup
-            
-            # Handle regions parameter (can be string or list)
-            regions = event.get('regions', event.get('region', None))
-            if regions is None:
-                regions = ['westeurope']
-            elif isinstance(regions, str):
-                regions = [regions]
+            regions = _normalize_regions(event)
             
             # Execute run operation
             response, outputs = _execute_run(
@@ -367,13 +385,7 @@ def lambda_handler(event, context):
             task = event.get('task')
             fleet_name = event.get('fleet_name', 'lambda-fleet')
             num_instances = event.get('num_instances', len(targets) if targets else 1)
-            
-            # Handle regions parameter (can be string or list)
-            regions = event.get('regions', event.get('region', None))
-            if regions is None:
-                regions = ['westeurope']
-            elif isinstance(regions, str):
-                regions = [regions]
+            regions = _normalize_regions(event)
             
             # Create temporary input file with targets
             input_file = _create_input_file(targets)

@@ -4,6 +4,7 @@ import subprocess
 import getpass
 import sys
 import tempfile
+import random
 from beaupy import select
 from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
@@ -70,7 +71,6 @@ def select_random_region(regions):
     Returns:
         str: Selected region name
     """
-    import random
     if not regions:
         return 'westeurope'
     return random.choice(regions)
