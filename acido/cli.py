@@ -43,6 +43,7 @@ create_parser.add_argument('--no-update', dest='no_update', action='store_true',
 create_parser.add_argument('--root', dest='run_as_root', action='store_true', help='Run package installation commands as root user (useful for images that run as non-root by default)')
 create_parser.add_argument('--entrypoint', dest='custom_entrypoint', help='Override the default ENTRYPOINT in the Dockerfile (e.g., "/bin/bash")')
 create_parser.add_argument('--cmd', dest='custom_cmd', help='Override the default CMD in the Dockerfile (e.g., "sleep infinity")')
+create_parser.add_argument('--no-cache', dest='no_cache', action='store_true', help='Do not use cache when building the Docker image')
 
 # Configure subcommand (alias for -c/--config)
 configure_parser = subparsers.add_parser('configure', help='Configure acido (alias for -c/--config)')
@@ -59,6 +60,7 @@ fleet_parser.add_argument('-o', '--output', dest='write_to_file', help='Save out
 fleet_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
 fleet_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 fleet_parser.add_argument('--rm-when-done', dest='rm_when_done', action='store_true', help='Remove after completion')
+fleet_parser.add_argument('--region', dest='region', required=True, help='Azure region (e.g., westeurope, eastus)')
 
 # Run subcommand (ephemeral single instance with auto-cleanup)
 run_parser = subparsers.add_parser('run', help='Run a single ephemeral container instance with auto-cleanup after specified duration')
@@ -70,6 +72,7 @@ run_parser.add_argument('-o', '--output', dest='write_to_file', help='Save outpu
 run_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
 run_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 run_parser.add_argument('--no-cleanup', dest='no_cleanup', action='store_true', help='Skip auto-cleanup after duration')
+run_parser.add_argument('--region', dest='region', required=True, help='Azure region (e.g., westeurope, eastus)')
 
 # List subcommand (Docker-like: acido ls)
 ls_parser = subparsers.add_parser('ls', help='List all container instances')
@@ -572,7 +575,7 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, region='westeurope'):
         response = {}
         input_files = None
         
@@ -623,7 +626,8 @@ class Acido(object):
                             command=scan_cmd,
                             network_profile=self.network_profile,
                             env_vars=env_vars,
-                            quiet=quiet)
+                            quiet=quiet,
+                            location=region)
         else:
 
             if input_file:
@@ -654,7 +658,8 @@ class Acido(object):
                 env_vars=env_vars,
                 network_profile=self.network_profile,
                 input_files=input_files,
-                quiet=quiet)
+                quiet=quiet,
+                location=region)
         
         os.system('rm -f /tmp/acido-input*')
 
@@ -734,7 +739,7 @@ class Acido(object):
     
     def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
             write_to_file: str = None, output_format: str = 'txt', 
-            quiet: bool = False, cleanup: bool = True):
+            quiet: bool = False, cleanup: bool = True, region: str = 'westeurope'):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -752,6 +757,7 @@ class Acido(object):
             output_format: Output format ('txt' or 'json')
             quiet: Quiet mode with progress bar
             cleanup: Whether to auto-cleanup after duration (default: True)
+            region: Azure region (default: westeurope)
         
         Returns:
             tuple: (response dict, outputs dict) or None if interactive mode
@@ -799,7 +805,8 @@ class Acido(object):
             env_vars=env_vars,
             network_profile=self.network_profile,
             input_files=None,
-            quiet=quiet
+            quiet=quiet,
+            location=region
         )
         
         print_if_not_quiet(good(f"Successfully created container instance: [ {bold(name)} ]"))
@@ -1487,7 +1494,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
 {cmd_line}
 """
 
-    def create_acido_image_from_github(self, github_url: str, quiet: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
+    def create_acido_image_from_github(self, github_url: str, quiet: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, no_cache: bool = False) -> str:
         """
         Create an acido-compatible Docker image from a GitHub repository.
         
@@ -1499,6 +1506,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             quiet: Suppress verbose output and show progress bar
             custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile (default: /opt/acido-venv/bin/acido)
             custom_cmd: Override the default CMD in the Dockerfile (default: sleep infinity)
+            no_cache: Do not use cache when building the Docker image
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1761,8 +1769,11 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
                 print(good(f'Image name: {new_image_name}'))
                 print(info('Building Docker image...'))
             
-            # Build the image
-            build_cmd = ['docker', 'build', '-t', new_image_name, repo_dir]
+            # Build the image with optional --no-cache flag
+            build_cmd = ['docker', 'build']
+            if no_cache:
+                build_cmd.append('--no-cache')
+            build_cmd.extend(['-t', new_image_name, repo_dir])
             result = subprocess.run(build_cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
@@ -1853,7 +1864,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             return new_image_name
 
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None):
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, no_cache: bool = False):
         """
         Create an acido-compatible Docker image from a base image or GitHub repository.
         
@@ -1865,6 +1876,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             run_as_root: Run package installation commands as root user (useful for images that run as non-root by default)
             custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile (default: /opt/acido-venv/bin/acido)
             custom_cmd: Override the default CMD in the Dockerfile (default: sleep infinity)
+            no_cache: Do not use cache when building the Docker image
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1877,7 +1889,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if run_as_root:
                 if not quiet:
                     print(orange('Warning: --root option is ignored when building from GitHub URL'))
-            return self.create_acido_image_from_github(base_image, quiet=quiet, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
+            return self.create_acido_image_from_github(base_image, quiet=quiet, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd, no_cache=no_cache)
         
         # Validate Docker is available
         try:
@@ -1950,8 +1962,14 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
                 print(good(f'Building image: {new_image_name}'))
                 print(info(f'Using distro type: {distro_info["type"]}'))
             
+            # Build docker build command with optional --no-cache flag
+            build_cmd = ['docker', 'build']
+            if no_cache:
+                build_cmd.append('--no-cache')
+            build_cmd.extend(['-t', new_image_name, tmpdir])
+            
             result = subprocess.run(
-                ['docker', 'build', '-t', new_image_name, tmpdir],
+                build_cmd,
                 capture_output=True, text=True
             )
             
@@ -2081,7 +2099,8 @@ def main():
             write_to_file=args.write_to_file,
             output_format=args.output_format,
             interactive=bool(args.interactive),
-            quiet=args.quiet
+            quiet=args.quiet,
+            region=args.region
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
@@ -2096,7 +2115,8 @@ def main():
             write_to_file=args.write_to_file,
             output_format=args.output_format,
             quiet=args.quiet,
-            cleanup=not args.no_cleanup
+            cleanup=not args.no_cleanup,
+            region=args.region
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
@@ -2119,7 +2139,8 @@ def main():
         run_as_root = getattr(args, 'run_as_root', False)
         custom_entrypoint = getattr(args, 'custom_entrypoint', None)
         custom_cmd = getattr(args, 'custom_cmd', None)
-        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
+        no_cache = getattr(args, 'no_cache', False)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd, no_cache=no_cache)
 
 if __name__ == "__main__":
     main()
