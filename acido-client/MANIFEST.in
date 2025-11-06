@@ -1,0 +1,4 @@
+include README.md
+include LICENSE
+include LICENSE-MIT
+recursive-include acido_client *.py
