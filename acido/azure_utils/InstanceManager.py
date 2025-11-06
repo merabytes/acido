@@ -89,9 +89,6 @@ class InstanceManager(ManagedIdentity):
         results = {}
         deploy_instances = []
 
-        if command:
-            command = f"acido -sh {quote(command)}"
-
         for i_num in range(1, instance_number + 1):
             env_vars['INSTANCE_NAME'] = f'{name}-{i_num:02d}'
             scan_cmd = command
@@ -108,7 +105,7 @@ class InstanceManager(ManagedIdentity):
                     cpu=float(max_cpu),
                     image=image_name,
                     env_vars=env_vars,
-                    command=["/bin/sh", "-c", scan_cmd] if scan_cmd else None
+                    command=["/opt/acido-venv/bin/acido", "-sh", command] if scan_cmd else None
                 )
             )
 

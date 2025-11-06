@@ -1110,26 +1110,57 @@ class Acido(object):
         
         return True
 
+    def _normalize_github_url(self, url: str) -> str:
+        """
+        Normalize a GitHub URL to include the git+ prefix.
+        
+        Args:
+            url: GitHub URL (with or without git+ prefix)
+        
+        Returns:
+            str: Normalized URL with git+ prefix
+        """
+        if url.startswith('git+'):
+            return url
+        
+        # Add git+ prefix
+        return f'git+{url}'
+
+
     def _parse_github_url(self, url: str) -> dict:
         """
         Parse a GitHub URL in git+https:// format.
         
         Supports formats:
-        - git+https://github.com/user/repo
-        - git+https://github.com/user/repo.git
-        - git+https://github.com/user/repo@branch
-        - git+https://github.com/user/repo@v1.0
-        - git+https://github.com/user/repo.git@commit_sha
+            - git+https://github.com/user/repo
+            - https://github.com/user/repo  # Auto-normalizes to git+https://
+            - git+https://github.com/user/repo.git
+            - git+https://github.com/user/repo@branch
+            - git+https://github.com/user/repo@v1.0
+            - git+https://github.com/user/repo.git@commit_sha
+        
+        Args:
+            url: GitHub URL to parse (with or without git+ prefix)
         
         Returns:
             dict: {
                 'repo_url': 'https://github.com/user/repo.git',
-                'ref': 'branch/tag/commit or None',
-                'repo_name': 'repo'
-            } or None if not a valid GitHub URL
+                'ref': 'branch/tag/commit' or None,
+                'repo_name': 'repo',
+                'user': 'user'
+            }
+            None if not a valid GitHub URL
         """
-        # Check if it starts with git+https://
-        if not url.startswith('git+https://'):
+        # ✅ NORMALIZE: Add git+ prefix if missing
+        if not url.startswith('git+'):
+            # Check if it's a GitHub URL without git+ prefix
+            if self._is_github_url(url):
+                url = self._normalize_github_url(url)
+            else:
+                return None
+        
+        # Check if it starts with git+https:// or git+http://
+        if not url.startswith('git+https://') and not url.startswith('git+http://'):
             return None
         
         # Remove git+ prefix
@@ -1137,7 +1168,8 @@ class Acido(object):
         
         # Parse the URL with optional @ref
         # Pattern: https://github.com/user/repo(.git)?(@ref)?
-        pattern = r'^https://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+?)(\.git)?(@([a-zA-Z0-9_./+-]+))?$'
+        # More permissive: allow any characters after @ for ref
+        pattern = r'^https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+?)(\.git)?(?:@(.+))?$'
         match = re.match(pattern, url_without_prefix)
         
         if not match:
@@ -1145,20 +1177,39 @@ class Acido(object):
         
         user = match.group(1)
         repo = match.group(2)
-        ref = match.group(5)  # Optional ref after @
+        ref = match.group(4)  # Optional ref after @ (group 4 now, not 5)
         
         # Build the full repo URL
         repo_url = f'https://github.com/{user}/{repo}.git'
         
         return {
             'repo_url': repo_url,
-            'ref': ref,  # None if not specified
-            'repo_name': repo
+            'ref': ref.strip() if ref else None,  # Strip whitespace from ref
+            'repo_name': repo,
+            'user': user
         }
 
+
     def _is_github_url(self, url: str) -> bool:
-        """Check if a string is a GitHub URL in git+https:// format."""
-        return url.startswith('git+https://github.com/')
+        """
+        Check if a string is a GitHub URL.
+        
+        Supports:
+            - git+https://github.com/...
+            - git+http://github.com/...
+            - https://github.com/...
+            - http://github.com/...
+        
+        Returns:
+            bool: True if it's a GitHub URL, False otherwise
+        """
+        github_patterns = [
+            'git+https://github.com/',
+            'git+http://github.com/',
+            'https://github.com/',
+            'http://github.com/'
+        ]
+        return any(url.startswith(pattern) for pattern in github_patterns)
 
     def _validate_image_name(self, image_name: str) -> bool:
         """
@@ -1554,7 +1605,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
         The repository must contain a Dockerfile at the root.
         
         Args:
-            github_url: GitHub URL in git+https:// format (e.g., 'git+https://github.com/user/repo@branch')
+            github_url: GitHub URL in git+https:// format (e.g., 'git+https://github.com/user/repo[@ref]')
             quiet: Suppress verbose output and show progress bar
         
         Returns:
@@ -1594,66 +1645,118 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if not quiet:
                 print(bad(f'Invalid GitHub URL: {github_url}'))
                 print(info('Expected format: git+https://github.com/user/repo[@ref]'))
+                print(info('Examples:'))
+                print(info('  git+https://github.com/user/repo'))
+                print(info('  git+https://github.com/user/repo@main'))
+                print(info('  git+https://github.com/user/repo.git@v1.0.0'))
             return None
         
         if not quiet:
-            print(good(f'Cloning repository: {github_info["repo_url"]}'))
+            print(good(f'Repository: {github_info["repo_url"]}'))
             if github_info['ref']:
                 print(info(f'Using ref: {github_info["ref"]}'))
+            else:
+                print(info('Using default branch'))
         
         # Create temporary directory for cloning
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_dir = os.path.join(tmpdir, 'repo')
             
-            # Clone the repository
+            # Clone the repository with improved error handling
+            clone_successful = False
+            
             if github_info['ref']:
-                # For refs (branch/tag/commit), we need different strategies
-                # Try clone with --branch first (works for branches and tags)
-                clone_cmd = ['git', 'clone', '--branch', github_info['ref'], github_info['repo_url'], repo_dir]
+                # Strategy 1: Try clone with --branch first (works for branches and tags)
+                clone_cmd = ['git', 'clone', '--depth', '1', '--branch', github_info['ref'], 
+                            github_info['repo_url'], repo_dir]
                 
                 if not quiet:
-                    print(info('Cloning repository...'))
+                    print(info(f'Attempting shallow clone with ref: {github_info["ref"]}...'))
                 
                 result = subprocess.run(clone_cmd, capture_output=True, text=True)
                 
-                # If --branch failed (e.g., commit SHA), clone the full repo and checkout
-                if result.returncode != 0:
+                if result.returncode == 0:
+                    clone_successful = True
                     if not quiet:
-                        print(info(f'Cloning full repository and checking out {github_info["ref"]}...'))
+                        print(good('Successfully cloned repository'))
+                else:
+                    # Strategy 2: If --branch failed (e.g., commit SHA), clone full repo
+                    if not quiet:
+                        print(info(f'Shallow clone failed, attempting full clone...'))
                     
-                    # Clone without --branch
                     clone_cmd = ['git', 'clone', github_info['repo_url'], repo_dir]
                     result = subprocess.run(clone_cmd, capture_output=True, text=True)
                     
                     if result.returncode != 0:
                         if not quiet:
-                            print(bad(f'Failed to clone repository:'))
-                            print(result.stderr)
+                            print(bad('Failed to clone repository'))
+                            print(bad(f'Command: {" ".join(clone_cmd)}'))
+                            if result.stderr:
+                                print(bad('Error output:'))
+                                for line in result.stderr.split('\n'):
+                                    if line.strip():
+                                        print(f'  {line}')
+                            print(info('Possible causes:'))
+                            print(info('  - Repository does not exist or is private'))
+                            print(info('  - Network connectivity issues'))
+                            print(info('  - Authentication required'))
                         return None
                     
-                    # Checkout specific ref (works for commit SHA)
+                    # Strategy 3: Checkout the specific ref
+                    if not quiet:
+                        print(info(f'Checking out ref: {github_info["ref"]}...'))
+                    
                     checkout_cmd = ['git', '-C', repo_dir, 'checkout', github_info['ref']]
                     result = subprocess.run(checkout_cmd, capture_output=True, text=True)
                     
                     if result.returncode != 0:
                         if not quiet:
-                            print(bad(f'Failed to checkout {github_info["ref"]}:'))
-                            print(result.stderr)
+                            print(bad(f'Failed to checkout ref: {github_info["ref"]}'))
+                            if result.stderr:
+                                print(bad('Error output:'))
+                                for line in result.stderr.split('\n'):
+                                    if line.strip():
+                                        print(f'  {line}')
+                            print(info('The specified ref might not exist in the repository'))
                         return None
+                    
+                    clone_successful = True
+                    if not quiet:
+                        print(good(f'Successfully checked out {github_info["ref"]}'))
+            
             else:
-                # No ref specified, clone default branch
-                clone_cmd = ['git', 'clone', github_info['repo_url'], repo_dir]
+                # No ref specified, clone default branch with shallow clone
+                clone_cmd = ['git', 'clone', '--depth', '1', github_info['repo_url'], repo_dir]
                 
                 if not quiet:
-                    print(info('Cloning repository...'))
+                    print(info('Cloning default branch...'))
                 
                 result = subprocess.run(clone_cmd, capture_output=True, text=True)
                 
                 if result.returncode != 0:
                     if not quiet:
-                        print(bad(f'Failed to clone repository:'))
-                        print(result.stderr)
+                        print(bad('Failed to clone repository'))
+                        print(bad(f'Command: {" ".join(clone_cmd)}'))
+                        if result.stderr:
+                            print(bad('Error output:'))
+                            for line in result.stderr.split('\n'):
+                                if line.strip():
+                                    print(f'  {line}')
+                        print(info('Possible causes:'))
+                        print(info('  - Repository does not exist or is private'))
+                        print(info('  - Network connectivity issues'))
+                        print(info('  - Authentication required'))
                     return None
+                
+                clone_successful = True
+                if not quiet:
+                    print(good('Successfully cloned repository'))
+            
+            # Verify clone was successful
+            if not clone_successful:
+                if not quiet:
+                    print(bad('Clone operation did not complete successfully'))
+                return None
             
             # Check if Dockerfile exists
             dockerfile_path = os.path.join(repo_dir, 'Dockerfile')
@@ -1661,20 +1764,27 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
                 if not quiet:
                     print(bad('No Dockerfile found in repository root'))
                     print(info('The repository must contain a Dockerfile at the root'))
+                    print(info(f'Searched path: {dockerfile_path}'))
                 return None
+            
+            if not quiet:
+                print(good('Found Dockerfile'))
             
             # Generate image name
             repo_name = github_info['repo_name']
             image_tag = github_info['ref'] if github_info['ref'] else 'latest'
+            
             # Sanitize tag for Docker compatibility
-            # Docker tags can only contain [a-zA-Z0-9._-]
-            # Replace any other character with hyphen and ensure it doesn't start/end with separator
+            # Docker tags can only contain [a-zA-Z0-9._-] and max 128 chars
             sanitized_tag = re.sub(r'[^a-zA-Z0-9._-]', '-', image_tag)
             # Remove leading/trailing separators
             sanitized_tag = sanitized_tag.strip('.-_')
             # Ensure tag is not empty
             if not sanitized_tag:
                 sanitized_tag = 'latest'
+            # Truncate if too long (Docker limit is 128 chars)
+            if len(sanitized_tag) > 128:
+                sanitized_tag = sanitized_tag[:128].rstrip('.-_')
             
             new_image_name = f"{self.image_registry_server}/{repo_name}-acido:{sanitized_tag}"
             
@@ -1682,76 +1792,104 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if not self._validate_image_name(new_image_name):
                 if not quiet:
                     print(bad(f'Generated invalid image name: {new_image_name}'))
+                    print(info('Please check your registry configuration'))
                 return None
             
             if not quiet:
-                print(good(f'Building image: {new_image_name}'))
+                print(good(f'Image name: {new_image_name}'))
+                print(info('Building Docker image...'))
             
             # Build the image
-            result = subprocess.run(
-                ['docker', 'build', '-t', new_image_name, repo_dir],
-                capture_output=True, text=True
-            )
+            build_cmd = ['docker', 'build', '-t', new_image_name, repo_dir]
+            result = subprocess.run(build_cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
                 if not quiet:
-                    print(bad(f'Failed to build image:'))
-                    print(result.stderr)
+                    print(bad('Failed to build Docker image'))
+                    if result.stderr:
+                        print(bad('Build error output:'))
+                        for line in result.stderr.split('\n'):
+                            if line.strip():
+                                print(f'  {line}')
+                    if result.stdout:
+                        print(bad('Build stdout:'))
+                        for line in result.stdout.split('\n'):
+                            if line.strip():
+                                print(f'  {line}')
                 return None
             
             # Show build output only if not quiet
-            if not quiet and result.stdout:
-                for line in result.stdout.split('\n'):
-                    if line.strip():
-                        print(f'  {line}')
-            
             if not quiet:
-                print(good(f'Successfully built {new_image_name}'))
+                if result.stdout:
+                    for line in result.stdout.split('\n'):
+                        if line.strip():
+                            print(f'  {line}')
+                print(good('Successfully built Docker image'))
             
             # Login to registry
             if not quiet:
-                print(info(f'Logging in to registry...'))
-            result = subprocess.run(
-                ['docker', 'login', self.image_registry_server, '-u', self.image_registry_username, 
-                 '--password-stdin'],
+                print(info('Logging in to Azure Container Registry...'))
+            
+            login_result = subprocess.run(
+                ['docker', 'login', self.image_registry_server, 
+                '-u', self.image_registry_username, 
+                '--password-stdin'],
                 input=self.image_registry_password.encode(),
                 capture_output=True,
                 text=False
             )
             
-            if result.returncode != 0:
+            if login_result.returncode != 0:
                 if not quiet:
-                    print(bad(f'Failed to login to registry'))
+                    print(bad('Failed to login to registry'))
+                    if login_result.stderr:
+                        error_msg = login_result.stderr.decode('utf-8', errors='ignore')
+                        print(bad(f'Error: {error_msg}'))
+                    print(info('Please check your registry credentials'))
                 return None
+            
+            if not quiet:
+                print(good('Successfully logged in to registry'))
             
             # Push to registry
             if not quiet:
-                print(info(f'Pushing to registry...'))
-            result = subprocess.run(
+                print(info('Pushing image to registry...'))
+            
+            push_result = subprocess.run(
                 ['docker', 'push', new_image_name],
                 capture_output=True, text=True
             )
             
-            if result.returncode != 0:
+            if push_result.returncode != 0:
                 if not quiet:
-                    print(bad(f'Failed to push image:'))
-                    print(result.stderr)
+                    print(bad('Failed to push image to registry'))
+                    if push_result.stderr:
+                        print(bad('Push error output:'))
+                        for line in push_result.stderr.split('\n'):
+                            if line.strip():
+                                print(f'  {line}')
                 return None
             
             # Show push output only if not quiet
-            if not quiet and result.stdout:
-                for line in result.stdout.split('\n'):
-                    if line.strip():
-                        print(f'  {line}')
+            if not quiet:
+                if push_result.stdout:
+                    for line in push_result.stdout.split('\n'):
+                        if line.strip():
+                            print(f'  {line}')
+                print(good(f'Successfully pushed {new_image_name}'))
             
-            # Extract short name for user-friendly message
-            short_name = f"{repo_name}-acido:{image_tag}"
+            # Generate user-friendly short name
+            short_name = f"{repo_name}-acido:{sanitized_tag}"
             
             if not quiet:
-                print(good(f'Successfully pushed {new_image_name}'))
-                print(info(f'You can now use this image with: acido -f myfleet -im {short_name}'))
+                print('')
+                print(good('✓ Image creation completed successfully!'))
+                print(info(f'Image: {new_image_name}'))
+                print(info(f'Usage: acido -f myfleet -im {short_name}'))
+                print('')
             
             return new_image_name
+
 
     def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, use_venv: bool = False):
         """
