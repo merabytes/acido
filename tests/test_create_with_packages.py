@@ -220,6 +220,36 @@ class TestCreateWithPackages(unittest.TestCase):
         # But should have apt-get install without update
         self.assertIn('apt-get install -y nmap', dockerfile)
 
+    def test_generate_dockerfile_default_entrypoint(self):
+        """Test that the default entrypoint is set to /opt/acido-venv/bin/acido."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'ubuntu:20.04'
+        distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
+        
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, None)
+        
+        # Check that the default entrypoint is set to the venv acido binary
+        self.assertIn('ENTRYPOINT ["/opt/acido-venv/bin/acido"]', dockerfile)
+        self.assertIn('CMD ["sleep", "infinity"]', dockerfile)
+
+    def test_generate_dockerfile_custom_entrypoint(self):
+        """Test that custom entrypoint overrides the default."""
+        # Create a minimal Acido object just to call the method
+        acido = Acido.__new__(Acido)
+        acido.image_registry_server = 'test.azurecr.io'
+        
+        base_image = 'ubuntu:20.04'
+        distro_info = {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
+        
+        dockerfile = acido._generate_dockerfile(base_image, distro_info, None, custom_entrypoint='/bin/bash')
+        
+        # Check that the custom entrypoint is used
+        self.assertIn('ENTRYPOINT ["/bin/bash"]', dockerfile)
+        self.assertNotIn('ENTRYPOINT ["/opt/acido-venv/bin/acido"]', dockerfile)
+
     def test_generate_dockerfile_with_update_alpine(self):
         """Test Dockerfile generation with default package update for Alpine."""
         # Create a minimal Acido object just to call the method

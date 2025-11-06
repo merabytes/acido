@@ -120,14 +120,17 @@ class TestCreateFromGitHub(unittest.TestCase):
         self.assertEqual(result['repo_name'], 'repo')
 
     def test_parse_github_url_invalid_no_prefix(self):
-        """Test parsing URL without git+ prefix."""
+        """Test parsing URL without git+ prefix now auto-normalizes."""
         acido = Acido.__new__(Acido)
         acido.image_registry_server = 'test.azurecr.io'
         
         url = 'https://github.com/user/repo'
         result = acido._parse_github_url(url)
         
-        self.assertIsNone(result)
+        # URL without git+ prefix is now auto-normalized and parsed
+        self.assertIsNotNone(result)
+        self.assertEqual(result['repo_url'], 'https://github.com/user/repo.git')
+        self.assertEqual(result['repo_name'], 'repo')
 
     def test_parse_github_url_invalid_not_github(self):
         """Test parsing URL not from github.com."""
@@ -146,13 +149,14 @@ class TestCreateFromGitHub(unittest.TestCase):
         
         self.assertTrue(acido._is_github_url('git+https://github.com/user/repo'))
         self.assertTrue(acido._is_github_url('git+https://github.com/user/repo@main'))
+        # Now also accepts URLs without git+ prefix
+        self.assertTrue(acido._is_github_url('https://github.com/user/repo'))
 
     def test_is_github_url_false(self):
         """Test is_github_url returns False for non-GitHub URLs."""
         acido = Acido.__new__(Acido)
         acido.image_registry_server = 'test.azurecr.io'
         
-        self.assertFalse(acido._is_github_url('https://github.com/user/repo'))
         self.assertFalse(acido._is_github_url('git+https://gitlab.com/user/repo'))
         self.assertFalse(acido._is_github_url('ubuntu:20.04'))
         self.assertFalse(acido._is_github_url('nuclei'))
@@ -173,8 +177,8 @@ class TestCreateFromGitHub(unittest.TestCase):
             
             result = acido.create_acido_image('git+https://github.com/user/repo', quiet=True)
             
-            # Verify create_acido_image_from_github was called
-            mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True)
+            # Verify create_acido_image_from_github was called with new signature
+            mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True, custom_entrypoint=None, custom_cmd=None)
 
     @patch('subprocess.run')
     def test_create_from_github_ignores_install_packages(self, mock_run):
@@ -198,7 +202,7 @@ class TestCreateFromGitHub(unittest.TestCase):
             )
             
             # Verify create_acido_image_from_github was called without install_packages
-            mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True)
+            mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True, custom_entrypoint=None, custom_cmd=None)
 
     def test_tag_sanitization(self):
         """Test that refs with special characters are sanitized for Docker tags."""

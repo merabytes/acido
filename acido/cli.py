@@ -41,8 +41,6 @@ create_parser.add_argument('--image', dest='base_image_url', help='Full Docker i
 create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan). Only works with base images, not GitHub URLs.')
 create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 create_parser.add_argument('--root', dest='run_as_root', action='store_true', help='Run package installation commands as root user (useful for images that run as non-root by default)')
-create_parser.add_argument('--break-system-packages', dest='break_system_packages', action='store_true', help='[Deprecated] Use --use-venv instead. Kept for backward compatibility')
-create_parser.add_argument('--use-venv', dest='use_venv', action='store_true', help='Install acido using Python virtual environment instead of pre-built binary (larger image size)')
 create_parser.add_argument('--entrypoint', dest='custom_entrypoint', help='Override the default ENTRYPOINT in the Dockerfile (e.g., "/bin/bash")')
 create_parser.add_argument('--cmd', dest='custom_cmd', help='Override the default CMD in the Dockerfile (e.g., "sleep infinity")')
 
@@ -216,14 +214,6 @@ parser.add_argument("--no-update",
 parser.add_argument("--root",
                     dest="run_as_root",
                     help="Run package installation commands as root user (useful for images that run as non-root by default)",
-                    action='store_true')
-parser.add_argument("--break-system-packages",
-                    dest="break_system_packages",
-                    help="[Deprecated] Use --use-venv instead. Kept for backward compatibility",
-                    action='store_true')
-parser.add_argument("--use-venv",
-                    dest="use_venv",
-                    help="Install acido using Python virtual environment instead of pre-built binary (larger image size)",
                     action='store_true')
 parser.add_argument("--entrypoint",
                     dest="custom_entrypoint",
@@ -1358,37 +1348,30 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
-    def _generate_dockerfile_with_binary(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, acido_version: str = None) -> str:
-        """Generate Dockerfile content using pre-built acido binary (lightweight approach)."""
+    def _format_entrypoint_and_cmd(self, custom_entrypoint: str = None, custom_cmd: str = None) -> tuple:
+        """
+        Format ENTRYPOINT and CMD for Dockerfile.
         
-        # Validate all package names to prevent command injection
-        validated_packages = []
-        if install_packages:
-            for pkg in install_packages:
-                if self._validate_package_name(pkg):
-                    validated_packages.append(pkg)
-                else:
-                    print(bad(f'Invalid package name "{pkg}" - skipping'))
+        Args:
+            custom_entrypoint: Custom entrypoint or None for default (/opt/acido-venv/bin/acido)
+            custom_cmd: Custom cmd or None for default (["sleep", "infinity"])
         
-        # Check if base image contains 'kali-rolling' to auto-install kali-linux-large
-        if 'kali-rolling' in base_image.lower():
-            if 'kali-linux-large' not in validated_packages:
-                validated_packages.insert(0, 'kali-linux-large')
-        
-        # Add USER root directive if run_as_root is enabled
-        user_root_directive = '\n# Switch to root user for installation\nUSER root\n' if run_as_root else ''
-        
+        Returns:
+            tuple: (entrypoint_line, cmd_line) formatted for Dockerfile
+        """
         # Set default ENTRYPOINT and CMD or use custom values
-        entrypoint = custom_entrypoint if custom_entrypoint is not None else '[]'
+        # Default entrypoint is now the acido venv binary
+        entrypoint = custom_entrypoint if custom_entrypoint is not None else '/opt/acido-venv/bin/acido'
         cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
         
         # Format entrypoint and cmd for Dockerfile
+        # If they look like JSON arrays, use as-is, otherwise treat as shell form
         if entrypoint.startswith('['):
             entrypoint_line = f'ENTRYPOINT {entrypoint}'
         elif entrypoint:
             entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
         else:
-            entrypoint_line = 'ENTRYPOINT []'
+            entrypoint_line = 'ENTRYPOINT ["/opt/acido-venv/bin/acido"]'
             
         if cmd.startswith('['):
             cmd_line = f'CMD {cmd}'
@@ -1397,83 +1380,9 @@ class Acido(object):
         else:
             cmd_line = 'CMD ["sleep", "infinity"]'
         
-        # Determine binary name based on distro
-        if distro_info['type'] == 'alpine':
-            binary_name = 'acido-alpine-x86_64'
-        else:
-            # Use ubuntu binary for debian/rhel
-            binary_name = 'acido-ubuntu-x86_64'
-        
-        # Use latest version or specified version
-        version = acido_version if acido_version else __version__
-        download_url = f'https://github.com/merabytes/acido/releases/download/v{version}/{binary_name}'
-        
-        if distro_info['type'] == 'alpine':
-            # Build apk install command if packages are specified
-            pkg_install = ''
-            if validated_packages:
-                pkg_list = ' '.join(validated_packages)
-                update_cmd = '' if no_update else 'apk update && '
-                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apk add --no-cache {pkg_list}\n'
-            
-            return f"""FROM {base_image}
-{user_root_directive}
-# Install wget and ca-certificates for downloading acido binary
-RUN apk update && apk add --no-cache wget ca-certificates
-{pkg_install}
-# Download and install pre-built acido binary (lightweight, no Python needed)
-RUN wget -O /usr/local/bin/acido {download_url} && \\
-    chmod +x /usr/local/bin/acido && \\
-    /usr/local/bin/acido --version || echo "acido binary installed"
+        return entrypoint_line, cmd_line
 
-{entrypoint_line}
-{cmd_line}
-"""
-        elif distro_info['type'] == 'rhel':
-            pkg_manager = distro_info['pkg_manager']
-            if pkg_manager not in ['yum', 'dnf']:
-                pkg_manager = 'yum'
-            
-            pkg_install = ''
-            if validated_packages:
-                pkg_list = ' '.join(validated_packages)
-                pkg_install = f'\n# Install custom packages\nRUN {pkg_manager} install -y {pkg_list} && {pkg_manager} clean all\n'
-            
-            return f"""FROM {base_image}
-{user_root_directive}
-# Install wget and ca-certificates for downloading acido binary
-RUN {pkg_manager} install -y wget ca-certificates && {pkg_manager} clean all
-{pkg_install}
-# Download and install pre-built acido binary (lightweight, no Python needed)
-RUN wget -O /usr/local/bin/acido {download_url} && \\
-    chmod +x /usr/local/bin/acido && \\
-    /usr/local/bin/acido --version || echo "acido binary installed"
-
-{entrypoint_line}
-{cmd_line}
-"""
-        else:  # Debian/Ubuntu-based
-            pkg_install = ''
-            if validated_packages:
-                pkg_list = ' '.join(validated_packages)
-                update_cmd = '' if no_update else 'apt-get update && '
-                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apt-get install -y {pkg_list} && rm -rf /var/lib/apt/lists/*\n'
-            
-            return f"""FROM {base_image}
-{user_root_directive}
-# Install wget and ca-certificates for downloading acido binary
-RUN apt-get update && apt-get install -y wget ca-certificates && rm -rf /var/lib/apt/lists/*
-{pkg_install}
-# Download and install pre-built acido binary (lightweight, no Python needed)
-RUN wget -O /usr/local/bin/acido {download_url} && \\
-    chmod +x /usr/local/bin/acido && \\
-    /usr/local/bin/acido --version || echo "acido binary installed"
-
-{entrypoint_line}
-{cmd_line}
-"""
-
-    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
+    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
         """Generate Dockerfile content based on distro and install custom packages."""
         
         # Validate all package names to prevent command injection
@@ -1494,28 +1403,8 @@ RUN wget -O /usr/local/bin/acido {download_url} && \\
         # This is needed for images that run as non-root by default (e.g., alpine/nikto)
         user_root_directive = '\n# Switch to root user for package installation\nUSER root\n' if run_as_root else ''
         
-        # Add --break-system-packages flag if needed (for PEP 668 externally managed environments)
-        pip_install_flags = '--break-system-packages ' if break_system_packages else ''
-        
-        # Set default ENTRYPOINT and CMD or use custom values
-        entrypoint = custom_entrypoint if custom_entrypoint is not None else '[]'
-        cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
-        
-        # Format entrypoint and cmd for Dockerfile
-        # If they look like JSON arrays, use as-is, otherwise treat as shell form
-        if entrypoint.startswith('['):
-            entrypoint_line = f'ENTRYPOINT {entrypoint}'
-        elif entrypoint:
-            entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
-        else:
-            entrypoint_line = 'ENTRYPOINT []'
-            
-        if cmd.startswith('['):
-            cmd_line = f'CMD {cmd}'
-        elif cmd:
-            cmd_line = f'CMD ["{cmd}"]'
-        else:
-            cmd_line = 'CMD ["sleep", "infinity"]'
+        # Format entrypoint and cmd using helper method
+        entrypoint_line, cmd_line = self._format_entrypoint_and_cmd(custom_entrypoint, custom_cmd)
         
         if distro_info['type'] == 'alpine':
             # Build apk install command if packages are specified
@@ -1598,15 +1487,18 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
 {cmd_line}
 """
 
-    def create_acido_image_from_github(self, github_url: str, quiet: bool = False) -> str:
+    def create_acido_image_from_github(self, github_url: str, quiet: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
         """
         Create an acido-compatible Docker image from a GitHub repository.
         
-        The repository must contain a Dockerfile at the root.
+        The repository must contain a Dockerfile at the root. The Dockerfile will be modified
+        to install acido using a Python virtual environment at /opt/acido-venv.
         
         Args:
             github_url: GitHub URL in git+https:// format (e.g., 'git+https://github.com/user/repo[@ref]')
             quiet: Suppress verbose output and show progress bar
+            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile (default: /opt/acido-venv/bin/acido)
+            custom_cmd: Override the default CMD in the Dockerfile (default: sleep infinity)
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1770,6 +1662,76 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if not quiet:
                 print(good('Found Dockerfile'))
             
+            # Read and modify the Dockerfile to install acido
+            if not quiet:
+                print(info('Modifying Dockerfile to install acido...'))
+            
+            with open(dockerfile_path, 'r') as f:
+                original_dockerfile = f.read()
+            
+            # Detect the base image to determine distro type
+            base_image_match = re.search(r'^FROM\s+(\S+)', original_dockerfile, re.MULTILINE)
+            if not base_image_match:
+                if not quiet:
+                    print(bad('Could not find FROM statement in Dockerfile'))
+                return None
+            
+            base_image = base_image_match.group(1)
+            
+            # Detect distro type from base image
+            distro_info = self._detect_distro(base_image, quiet=True)
+            
+            # Generate acido installation instructions based on distro
+            if distro_info['type'] == 'alpine':
+                acido_install = '''
+# Install Python and acido in virtual environment
+RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers && \\
+    python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH
+ENV PATH="/opt/acido-venv/bin:$PATH"
+'''
+            elif distro_info['type'] == 'rhel':
+                pkg_manager = distro_info.get('pkg_manager', 'yum')
+                if pkg_manager not in ['yum', 'dnf']:
+                    pkg_manager = 'yum'
+                acido_install = f'''
+# Install Python and acido in virtual environment
+RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all && \\
+    python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH
+ENV PATH="/opt/acido-venv/bin:$PATH"
+'''
+            else:  # Debian/Ubuntu-based
+                acido_install = '''
+# Install Python and acido in virtual environment
+RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/* && \\
+    python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH
+ENV PATH="/opt/acido-venv/bin:$PATH"
+'''
+            
+            # Format entrypoint and cmd using helper method
+            entrypoint_line, cmd_line = self._format_entrypoint_and_cmd(custom_entrypoint, custom_cmd)
+            
+            # Append acido installation and set entrypoint/cmd
+            modified_dockerfile = original_dockerfile + '\n' + acido_install + '\n' + entrypoint_line + '\n' + cmd_line + '\n'
+            
+            # Write modified Dockerfile
+            with open(dockerfile_path, 'w') as f:
+                f.write(modified_dockerfile)
+            
+            if not quiet:
+                print(good('Dockerfile modified successfully'))
+            
             # Generate image name
             repo_name = github_info['repo_name']
             image_tag = github_info['ref'] if github_info['ref'] else 'latest'
@@ -1891,7 +1853,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             return new_image_name
 
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, use_venv: bool = False):
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None):
         """
         Create an acido-compatible Docker image from a base image or GitHub repository.
         
@@ -1901,10 +1863,8 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             install_packages: List of packages to install (e.g., ['nmap', 'masscan']) - only applicable for base images, not GitHub URLs
             no_update: Skip package list update before installing packages - only applicable for base images
             run_as_root: Run package installation commands as root user (useful for images that run as non-root by default)
-            break_system_packages: [Deprecated] Use use_venv instead. Kept for backward compatibility
-            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile
-            custom_cmd: Override the default CMD in the Dockerfile
-            use_venv: Use Python virtual environment instead of pre-built binary (larger image, but more flexible)
+            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile (default: /opt/acido-venv/bin/acido)
+            custom_cmd: Override the default CMD in the Dockerfile (default: sleep infinity)
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1917,7 +1877,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if run_as_root:
                 if not quiet:
                     print(orange('Warning: --root option is ignored when building from GitHub URL'))
-            return self.create_acido_image_from_github(base_image, quiet=quiet)
+            return self.create_acido_image_from_github(base_image, quiet=quiet, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
         
         # Validate Docker is available
         try:
@@ -1953,16 +1913,10 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             pbar.update(1)
             pbar.set_description("Generating Dockerfile")
         
-        # Generate Dockerfile content
-        # Use binary approach by default (lightweight), or venv if explicitly requested or if --break-system-packages is set (backward compat)
-        if use_venv or break_system_packages:
-            if not quiet:
-                print(info('Using virtual environment approach (larger image size)'))
-            dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root, break_system_packages, custom_entrypoint, custom_cmd)
-        else:
-            if not quiet:
-                print(info('Using pre-built binary approach (lightweight image)'))
-            dockerfile_content = self._generate_dockerfile_with_binary(base_image, distro_info, install_packages, no_update, run_as_root, custom_entrypoint, custom_cmd)
+        # Generate Dockerfile content using venv approach (always)
+        if not quiet:
+            print(info('Using virtual environment approach'))
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root, custom_entrypoint, custom_cmd)
         
         # Create temporary directory and Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2163,11 +2117,9 @@ def main():
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)
         run_as_root = getattr(args, 'run_as_root', False)
-        break_system_packages = getattr(args, 'break_system_packages', False)
         custom_entrypoint = getattr(args, 'custom_entrypoint', None)
         custom_cmd = getattr(args, 'custom_cmd', None)
-        use_venv = getattr(args, 'use_venv', False)
-        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, break_system_packages=break_system_packages, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd, use_venv=use_venv)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
 
 if __name__ == "__main__":
     main()
