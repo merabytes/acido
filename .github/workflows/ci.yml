@@ -160,6 +160,8 @@ jobs:
         IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
         STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
         STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
+        MANAGED_IDENTITY_ID: ${{ secrets.MANAGED_IDENTITY_ID }}
+        MANAGED_IDENTITY_CLIENT_ID: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}
       run: |
         # Test GitHub URL support - build nuclei image directly from projectdiscovery/nuclei repository
         # This validates the new git+https:// syntax for building images from GitHub
