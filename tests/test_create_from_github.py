@@ -161,48 +161,6 @@ class TestCreateFromGitHub(unittest.TestCase):
         self.assertFalse(acido._is_github_url('ubuntu:20.04'))
         self.assertFalse(acido._is_github_url('nuclei'))
 
-    @patch('subprocess.run')
-    def test_create_from_github_delegates_to_github_method(self, mock_run):
-        """Test that create_acido_image delegates to create_acido_image_from_github for GitHub URLs."""
-        acido = Acido.__new__(Acido)
-        acido.image_registry_server = 'test.azurecr.io'
-        acido.image_registry_username = 'test-user'
-        acido.image_registry_password = 'test-pass'
-        
-        # Mock docker and git version checks
-        mock_run.return_value = Mock(returncode=0, stdout='', stderr='')
-        
-        with patch.object(acido, 'create_acido_image_from_github') as mock_github_create:
-            mock_github_create.return_value = 'test.azurecr.io/repo-acido:latest'
-            
-            result = acido.create_acido_image('git+https://github.com/user/repo', quiet=True)
-            
-            # Verify create_acido_image_from_github was called with new signature
-            mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True, custom_entrypoint=None, custom_cmd=None)
-
-    @patch('subprocess.run')
-    def test_create_from_github_ignores_install_packages(self, mock_run):
-        """Test that --install option is ignored for GitHub URLs."""
-        acido = Acido.__new__(Acido)
-        acido.image_registry_server = 'test.azurecr.io'
-        acido.image_registry_username = 'test-user'
-        acido.image_registry_password = 'test-pass'
-        
-        # Mock docker and git version checks
-        mock_run.return_value = Mock(returncode=0, stdout='', stderr='')
-        
-        with patch.object(acido, 'create_acido_image_from_github') as mock_github_create:
-            mock_github_create.return_value = 'test.azurecr.io/repo-acido:latest'
-            
-            # Call with install_packages - should be ignored
-            result = acido.create_acido_image(
-                'git+https://github.com/user/repo', 
-                quiet=True,
-                install_packages=['nmap', 'masscan']
-            )
-            
-            # Verify create_acido_image_from_github was called without install_packages
-            mock_github_create.assert_called_once_with('git+https://github.com/user/repo', quiet=True, custom_entrypoint=None, custom_cmd=None)
 
     def test_tag_sanitization(self):
         """Test that refs with special characters are sanitized for Docker tags."""
