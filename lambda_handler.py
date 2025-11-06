@@ -40,7 +40,7 @@ def _cleanup_file(filepath):
         pass
 
 
-def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_file, region='westeurope'):
+def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_file, regions=None):
     """Execute fleet operation and return response and outputs."""
     pool = ThreadPoolShim(processes=30)
     full_image_url = acido.build_image_url(image_name)
@@ -57,11 +57,11 @@ def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_fil
         interactive=False,
         quiet=True,
         pool=pool,
-        region=region
+        regions=regions
     )
 
 
-def _execute_run(acido, name, image_name, task, duration, cleanup, region='westeurope'):
+def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None):
     """Execute run operation (single ephemeral instance) and return response and outputs."""
     full_image_url = acido.build_image_url(image_name)
     
@@ -74,7 +74,7 @@ def _execute_run(acido, name, image_name, task, duration, cleanup, region='weste
         output_format='json',
         quiet=True,
         cleanup=cleanup,
-        region=region
+        regions=regions
     )
 
 
@@ -129,7 +129,7 @@ def lambda_handler(event, context):
         "image": "kali-rolling",
         "targets": ["merabytes.com", "uber.com", "facebook.com"],
         "task": "nmap -iL input -p 0-1000",
-        "region": "westeurope"  // optional, default is westeurope
+        "regions": ["westeurope", "eastus", "westus2"]  // optional, can be single region string or list
     }
     
     2. Run operation - Single ephemeral instance with auto-cleanup (e.g., for GitHub runners):
@@ -140,7 +140,7 @@ def lambda_handler(event, context):
         "task": "./run.sh",
         "duration": 900,  // optional, default 900s (15min)
         "cleanup": true,  // optional, default true
-        "region": "westeurope"  // optional, default is westeurope
+        "regions": ["westeurope", "eastus"]  // optional, can be single region string or list
     }
     
     3. List operation - List all container instances:
@@ -282,11 +282,17 @@ def lambda_handler(event, context):
             task = event.get('task')
             duration = event.get('duration', 900)  # Default 15 minutes
             cleanup = event.get('cleanup', True)  # Default to auto-cleanup
-            region = event.get('region', 'westeurope')  # Default to westeurope
+            
+            # Handle regions parameter (can be string or list)
+            regions = event.get('regions', event.get('region', None))
+            if regions is None:
+                regions = ['westeurope']
+            elif isinstance(regions, str):
+                regions = [regions]
             
             # Execute run operation
             response, outputs = _execute_run(
-                acido, name, image_name, task, duration, cleanup, region
+                acido, name, image_name, task, duration, cleanup, regions
             )
             
             # Return successful response
@@ -296,7 +302,7 @@ def lambda_handler(event, context):
                 'image': image_name,
                 'duration': duration,
                 'cleanup': cleanup,
-                'region': region,
+                'regions': regions,
                 'outputs': outputs
             })
         
@@ -361,14 +367,20 @@ def lambda_handler(event, context):
             task = event.get('task')
             fleet_name = event.get('fleet_name', 'lambda-fleet')
             num_instances = event.get('num_instances', len(targets) if targets else 1)
-            region = event.get('region', 'westeurope')  # Default to westeurope
+            
+            # Handle regions parameter (can be string or list)
+            regions = event.get('regions', event.get('region', None))
+            if regions is None:
+                regions = ['westeurope']
+            elif isinstance(regions, str):
+                regions = [regions]
             
             # Create temporary input file with targets
             input_file = _create_input_file(targets)
             
             # Execute fleet operation
             response, outputs = _execute_fleet(
-                acido, fleet_name, num_instances, image_name, task, input_file, region
+                acido, fleet_name, num_instances, image_name, task, input_file, regions
             )
             
             # Clean up temporary input file
@@ -384,7 +396,7 @@ def lambda_handler(event, context):
                 'fleet_name': fleet_name,
                 'instances': num_instances,
                 'image': image_name,
-                'region': region,
+                'regions': regions,
                 'outputs': outputs
             })
         
