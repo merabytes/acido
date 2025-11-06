@@ -9,6 +9,7 @@ from unittest.mock import Mock, patch, MagicMock, call
 import sys
 import os
 import tempfile
+from acido.utils.decoration import BANNER, __version__
 
 # Mock sys.argv to prevent argparse from processing test args
 _original_argv = sys.argv
@@ -88,12 +89,12 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertIn('# Install custom packages', dockerfile)
         self.assertIn('apt-get update && apt-get install -y nmap masscan', dockerfile)
         self.assertIn('pip install --upgrade pip', dockerfile)
-        self.assertIn('pip install acido', dockerfile)
+        self.assertIn('pip install acido=={__version__}', dockerfile)
         
         # Verify installation order: Python deps, then custom packages, then acido
         python_idx = dockerfile.find('python3-pip build-essential')
         custom_idx = dockerfile.find('# Install custom packages')
-        acido_idx = dockerfile.find('pip install acido')
+        acido_idx = dockerfile.find('pip install acido=={__version__}')
         
         self.assertLess(python_idx, custom_idx)
         self.assertLess(custom_idx, acido_idx)
@@ -115,7 +116,7 @@ class TestCreateWithPackages(unittest.TestCase):
         self.assertIn('# Install custom packages', dockerfile)
         self.assertIn('apk update && apk add --no-cache nmap masscan', dockerfile)
         self.assertIn('pip install --upgrade pip', dockerfile)
-        self.assertIn('pip install acido', dockerfile)
+        self.assertIn('pip install acido=={__version__}', dockerfile)
 
     def test_generate_dockerfile_kali_auto_install(self):
         """Test automatic kali-linux-large installation for kali-rolling images."""
@@ -164,7 +165,7 @@ class TestCreateWithPackages(unittest.TestCase):
         # Check that no custom package installation is present
         self.assertNotIn('# Install custom packages', dockerfile)
         self.assertIn('pip install --upgrade pip', dockerfile)
-        self.assertIn('pip install acido', dockerfile)
+        self.assertIn('pip install acido=={__version__}', dockerfile)
 
     def test_generate_dockerfile_invalid_packages_filtered(self):
         """Test that invalid package names are filtered out."""

@@ -1423,7 +1423,7 @@ RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev li
 # Create virtual environment and install acido (psutil will build from source)
 RUN python3 -m venv /opt/acido-venv && \\
     /opt/acido-venv/bin/pip install --upgrade pip && \\
-    /opt/acido-venv/bin/pip install acido
+    /opt/acido-venv/bin/pip install acido=={__version__}
 
 # Add virtual environment to PATH so acido CLI is available
 ENV PATH="/opt/acido-venv/bin:$PATH"
@@ -1453,7 +1453,7 @@ RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc 
 # Create virtual environment and install acido (psutil will build from source)
 RUN python3 -m venv /opt/acido-venv && \\
     /opt/acido-venv/bin/pip install --upgrade pip && \\
-    /opt/acido-venv/bin/pip install acido
+    /opt/acido-venv/bin/pip install acido=={__version__}
 
 # Add virtual environment to PATH so acido CLI is available
 ENV PATH="/opt/acido-venv/bin:$PATH"
@@ -1478,7 +1478,7 @@ RUN apt-get update && apt-get install -y python3 python3-pip build-essential pyt
 # Create virtual environment and install acido (psutil will build from source)
 RUN python3 -m venv /opt/acido-venv && \\
     /opt/acido-venv/bin/pip install --upgrade pip && \\
-    /opt/acido-venv/bin/pip install acido
+    /opt/acido-venv/bin/pip install acido=={__version__}
 
 # Add virtual environment to PATH so acido CLI is available
 ENV PATH="/opt/acido-venv/bin:$PATH"
@@ -1688,7 +1688,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers && \\
     python3 -m venv /opt/acido-venv && \\
     /opt/acido-venv/bin/pip install --upgrade pip && \\
-    /opt/acido-venv/bin/pip install acido
+    /opt/acido-venv/bin/pip install acido=={__version__}
 
 # Add virtual environment to PATH
 ENV PATH="/opt/acido-venv/bin:$PATH"
@@ -1702,7 +1702,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
 RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all && \\
     python3 -m venv /opt/acido-venv && \\
     /opt/acido-venv/bin/pip install --upgrade pip && \\
-    /opt/acido-venv/bin/pip install acido
+    /opt/acido-venv/bin/pip install acido=={__version__}
 
 # Add virtual environment to PATH
 ENV PATH="/opt/acido-venv/bin:$PATH"
@@ -1713,7 +1713,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/* && \\
     python3 -m venv /opt/acido-venv && \\
     /opt/acido-venv/bin/pip install --upgrade pip && \\
-    /opt/acido-venv/bin/pip install acido
+    /opt/acido-venv/bin/pip install acido=={__version__}
 
 # Add virtual environment to PATH
 ENV PATH="/opt/acido-venv/bin:$PATH"
