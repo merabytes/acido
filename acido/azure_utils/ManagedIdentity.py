@@ -117,10 +117,6 @@ class ManagedIdentity:
                 cred.get_token(scope)
                 return True
             except Exception as e:
-                # TEMP: print the underlying AAD error to know exactly why
-                import traceback
-                print(f"[aad-token-fail] scope={scope} type={type(e).__name__} msg={e}")
-                traceback.print_exc()
                 continue
         return False
 
