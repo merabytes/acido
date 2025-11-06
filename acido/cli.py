@@ -1348,6 +1348,39 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
+    def _format_entrypoint_and_cmd(self, custom_entrypoint: str = None, custom_cmd: str = None) -> tuple:
+        """
+        Format ENTRYPOINT and CMD for Dockerfile.
+        
+        Args:
+            custom_entrypoint: Custom entrypoint or None for default (/opt/acido-venv/bin/acido)
+            custom_cmd: Custom cmd or None for default (["sleep", "infinity"])
+        
+        Returns:
+            tuple: (entrypoint_line, cmd_line) formatted for Dockerfile
+        """
+        # Set default ENTRYPOINT and CMD or use custom values
+        # Default entrypoint is now the acido venv binary
+        entrypoint = custom_entrypoint if custom_entrypoint is not None else '/opt/acido-venv/bin/acido'
+        cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
+        
+        # Format entrypoint and cmd for Dockerfile
+        # If they look like JSON arrays, use as-is, otherwise treat as shell form
+        if entrypoint.startswith('['):
+            entrypoint_line = f'ENTRYPOINT {entrypoint}'
+        elif entrypoint:
+            entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
+        else:
+            entrypoint_line = 'ENTRYPOINT ["/opt/acido-venv/bin/acido"]'
+            
+        if cmd.startswith('['):
+            cmd_line = f'CMD {cmd}'
+        elif cmd:
+            cmd_line = f'CMD ["{cmd}"]'
+        else:
+            cmd_line = 'CMD ["sleep", "infinity"]'
+        
+        return entrypoint_line, cmd_line
 
     def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
         """Generate Dockerfile content based on distro and install custom packages."""
@@ -1370,26 +1403,8 @@ class Acido(object):
         # This is needed for images that run as non-root by default (e.g., alpine/nikto)
         user_root_directive = '\n# Switch to root user for package installation\nUSER root\n' if run_as_root else ''
         
-        # Set default ENTRYPOINT and CMD or use custom values
-        # Default entrypoint is now the acido venv binary
-        entrypoint = custom_entrypoint if custom_entrypoint is not None else '/opt/acido-venv/bin/acido'
-        cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
-        
-        # Format entrypoint and cmd for Dockerfile
-        # If they look like JSON arrays, use as-is, otherwise treat as shell form
-        if entrypoint.startswith('['):
-            entrypoint_line = f'ENTRYPOINT {entrypoint}'
-        elif entrypoint:
-            entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
-        else:
-            entrypoint_line = 'ENTRYPOINT []'
-            
-        if cmd.startswith('['):
-            cmd_line = f'CMD {cmd}'
-        elif cmd:
-            cmd_line = f'CMD ["{cmd}"]'
-        else:
-            cmd_line = 'CMD ["sleep", "infinity"]'
+        # Format entrypoint and cmd using helper method
+        entrypoint_line, cmd_line = self._format_entrypoint_and_cmd(custom_entrypoint, custom_cmd)
         
         if distro_info['type'] == 'alpine':
             # Build apk install command if packages are specified
@@ -1704,24 +1719,8 @@ RUN apt-get update && apt-get install -y python3 python3-pip build-essential pyt
 ENV PATH="/opt/acido-venv/bin:$PATH"
 '''
             
-            # Set default ENTRYPOINT and CMD or use custom values
-            entrypoint = custom_entrypoint if custom_entrypoint is not None else '/opt/acido-venv/bin/acido'
-            cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
-            
-            # Format entrypoint and cmd for Dockerfile
-            if entrypoint.startswith('['):
-                entrypoint_line = f'ENTRYPOINT {entrypoint}'
-            elif entrypoint:
-                entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
-            else:
-                entrypoint_line = 'ENTRYPOINT ["/opt/acido-venv/bin/acido"]'
-                
-            if cmd.startswith('['):
-                cmd_line = f'CMD {cmd}'
-            elif cmd:
-                cmd_line = f'CMD ["{cmd}"]'
-            else:
-                cmd_line = 'CMD ["sleep", "infinity"]'
+            # Format entrypoint and cmd using helper method
+            entrypoint_line, cmd_line = self._format_entrypoint_and_cmd(custom_entrypoint, custom_cmd)
             
             # Append acido installation and set entrypoint/cmd
             modified_dockerfile = original_dockerfile + '\n' + acido_install + '\n' + entrypoint_line + '\n' + cmd_line + '\n'
