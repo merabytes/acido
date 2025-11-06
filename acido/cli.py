@@ -41,7 +41,6 @@ create_parser.add_argument('--image', dest='base_image_url', help='Full Docker i
 create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan). Only works with base images, not GitHub URLs.')
 create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 create_parser.add_argument('--root', dest='run_as_root', action='store_true', help='Run package installation commands as root user (useful for images that run as non-root by default)')
-
 create_parser.add_argument('--entrypoint', dest='custom_entrypoint', help='Override the default ENTRYPOINT in the Dockerfile (e.g., "/bin/bash")')
 create_parser.add_argument('--cmd', dest='custom_cmd', help='Override the default CMD in the Dockerfile (e.g., "sleep infinity")')
 
@@ -215,14 +214,6 @@ parser.add_argument("--no-update",
 parser.add_argument("--root",
                     dest="run_as_root",
                     help="Run package installation commands as root user (useful for images that run as non-root by default)",
-                    action='store_true')
-parser.add_argument("--break-system-packages",
-                    dest="break_system_packages",
-                    help="[Deprecated] Use --use-venv instead. Kept for backward compatibility",
-                    action='store_true')
-parser.add_argument("--use-venv",
-                    dest="use_venv",
-                    help="Install acido using Python virtual environment instead of pre-built binary (larger image size)",
                     action='store_true')
 parser.add_argument("--entrypoint",
                     dest="custom_entrypoint",
