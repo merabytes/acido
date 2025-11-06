@@ -41,8 +41,6 @@ create_parser.add_argument('--image', dest='base_image_url', help='Full Docker i
 create_parser.add_argument('--install', dest='install_packages', action='append', help='Package to install (can be specified multiple times, e.g., --install nmap --install masscan). Only works with base images, not GitHub URLs.')
 create_parser.add_argument('--no-update', dest='no_update', action='store_true', help='Skip package list update before installing packages')
 create_parser.add_argument('--root', dest='run_as_root', action='store_true', help='Run package installation commands as root user (useful for images that run as non-root by default)')
-create_parser.add_argument('--break-system-packages', dest='break_system_packages', action='store_true', help='[Deprecated] Use --use-venv instead. Kept for backward compatibility')
-create_parser.add_argument('--use-venv', dest='use_venv', action='store_true', help='Install acido using Python virtual environment instead of pre-built binary (larger image size)')
 create_parser.add_argument('--entrypoint', dest='custom_entrypoint', help='Override the default ENTRYPOINT in the Dockerfile (e.g., "/bin/bash")')
 create_parser.add_argument('--cmd', dest='custom_cmd', help='Override the default CMD in the Dockerfile (e.g., "sleep infinity")')
 
@@ -216,14 +214,6 @@ parser.add_argument("--no-update",
 parser.add_argument("--root",
                     dest="run_as_root",
                     help="Run package installation commands as root user (useful for images that run as non-root by default)",
-                    action='store_true')
-parser.add_argument("--break-system-packages",
-                    dest="break_system_packages",
-                    help="[Deprecated] Use --use-venv instead. Kept for backward compatibility",
-                    action='store_true')
-parser.add_argument("--use-venv",
-                    dest="use_venv",
-                    help="Install acido using Python virtual environment instead of pre-built binary (larger image size)",
                     action='store_true')
 parser.add_argument("--entrypoint",
                     dest="custom_entrypoint",
@@ -1110,26 +1100,57 @@ class Acido(object):
         
         return True
 
+    def _normalize_github_url(self, url: str) -> str:
+        """
+        Normalize a GitHub URL to include the git+ prefix.
+        
+        Args:
+            url: GitHub URL (with or without git+ prefix)
+        
+        Returns:
+            str: Normalized URL with git+ prefix
+        """
+        if url.startswith('git+'):
+            return url
+        
+        # Add git+ prefix
+        return f'git+{url}'
+
+
     def _parse_github_url(self, url: str) -> dict:
         """
         Parse a GitHub URL in git+https:// format.
         
         Supports formats:
-        - git+https://github.com/user/repo
-        - git+https://github.com/user/repo.git
-        - git+https://github.com/user/repo@branch
-        - git+https://github.com/user/repo@v1.0
-        - git+https://github.com/user/repo.git@commit_sha
+            - git+https://github.com/user/repo
+            - https://github.com/user/repo  # Auto-normalizes to git+https://
+            - git+https://github.com/user/repo.git
+            - git+https://github.com/user/repo@branch
+            - git+https://github.com/user/repo@v1.0
+            - git+https://github.com/user/repo.git@commit_sha
+        
+        Args:
+            url: GitHub URL to parse (with or without git+ prefix)
         
         Returns:
             dict: {
                 'repo_url': 'https://github.com/user/repo.git',
-                'ref': 'branch/tag/commit or None',
-                'repo_name': 'repo'
-            } or None if not a valid GitHub URL
+                'ref': 'branch/tag/commit' or None,
+                'repo_name': 'repo',
+                'user': 'user'
+            }
+            None if not a valid GitHub URL
         """
-        # Check if it starts with git+https://
-        if not url.startswith('git+https://'):
+        # ✅ NORMALIZE: Add git+ prefix if missing
+        if not url.startswith('git+'):
+            # Check if it's a GitHub URL without git+ prefix
+            if self._is_github_url(url):
+                url = self._normalize_github_url(url)
+            else:
+                return None
+        
+        # Check if it starts with git+https:// or git+http://
+        if not url.startswith('git+https://') and not url.startswith('git+http://'):
             return None
         
         # Remove git+ prefix
@@ -1137,7 +1158,8 @@ class Acido(object):
         
         # Parse the URL with optional @ref
         # Pattern: https://github.com/user/repo(.git)?(@ref)?
-        pattern = r'^https://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+?)(\.git)?(@([a-zA-Z0-9_./+-]+))?$'
+        # More permissive: allow any characters after @ for ref
+        pattern = r'^https?://github\.com/([a-zA-Z0-9_-]+)/([a-zA-Z0-9_.-]+?)(\.git)?(?:@(.+))?$'
         match = re.match(pattern, url_without_prefix)
         
         if not match:
@@ -1145,20 +1167,39 @@ class Acido(object):
         
         user = match.group(1)
         repo = match.group(2)
-        ref = match.group(5)  # Optional ref after @
+        ref = match.group(4)  # Optional ref after @ (group 4 now, not 5)
         
         # Build the full repo URL
         repo_url = f'https://github.com/{user}/{repo}.git'
         
         return {
             'repo_url': repo_url,
-            'ref': ref,  # None if not specified
-            'repo_name': repo
+            'ref': ref.strip() if ref else None,  # Strip whitespace from ref
+            'repo_name': repo,
+            'user': user
         }
 
+
     def _is_github_url(self, url: str) -> bool:
-        """Check if a string is a GitHub URL in git+https:// format."""
-        return url.startswith('git+https://github.com/')
+        """
+        Check if a string is a GitHub URL.
+        
+        Supports:
+            - git+https://github.com/...
+            - git+http://github.com/...
+            - https://github.com/...
+            - http://github.com/...
+        
+        Returns:
+            bool: True if it's a GitHub URL, False otherwise
+        """
+        github_patterns = [
+            'git+https://github.com/',
+            'git+http://github.com/',
+            'https://github.com/',
+            'http://github.com/'
+        ]
+        return any(url.startswith(pattern) for pattern in github_patterns)
 
     def _validate_image_name(self, image_name: str) -> bool:
         """
@@ -1307,37 +1348,30 @@ class Acido(object):
             print(info('Could not reliably detect distro, defaulting to Debian-based configuration...'))
         return {'type': 'debian', 'python_pkg': 'python3', 'pkg_manager': 'apt-get', 'needs_break_packages': True}
 
-    def _generate_dockerfile_with_binary(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, acido_version: str = None) -> str:
-        """Generate Dockerfile content using pre-built acido binary (lightweight approach)."""
+    def _format_entrypoint_and_cmd(self, custom_entrypoint: str = None, custom_cmd: str = None) -> tuple:
+        """
+        Format ENTRYPOINT and CMD for Dockerfile.
         
-        # Validate all package names to prevent command injection
-        validated_packages = []
-        if install_packages:
-            for pkg in install_packages:
-                if self._validate_package_name(pkg):
-                    validated_packages.append(pkg)
-                else:
-                    print(bad(f'Invalid package name "{pkg}" - skipping'))
+        Args:
+            custom_entrypoint: Custom entrypoint or None for default (/opt/acido-venv/bin/acido)
+            custom_cmd: Custom cmd or None for default (["sleep", "infinity"])
         
-        # Check if base image contains 'kali-rolling' to auto-install kali-linux-large
-        if 'kali-rolling' in base_image.lower():
-            if 'kali-linux-large' not in validated_packages:
-                validated_packages.insert(0, 'kali-linux-large')
-        
-        # Add USER root directive if run_as_root is enabled
-        user_root_directive = '\n# Switch to root user for installation\nUSER root\n' if run_as_root else ''
-        
+        Returns:
+            tuple: (entrypoint_line, cmd_line) formatted for Dockerfile
+        """
         # Set default ENTRYPOINT and CMD or use custom values
-        entrypoint = custom_entrypoint if custom_entrypoint is not None else '[]'
+        # Default entrypoint is now the acido venv binary
+        entrypoint = custom_entrypoint if custom_entrypoint is not None else '/opt/acido-venv/bin/acido'
         cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
         
         # Format entrypoint and cmd for Dockerfile
+        # If they look like JSON arrays, use as-is, otherwise treat as shell form
         if entrypoint.startswith('['):
             entrypoint_line = f'ENTRYPOINT {entrypoint}'
         elif entrypoint:
             entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
         else:
-            entrypoint_line = 'ENTRYPOINT []'
+            entrypoint_line = 'ENTRYPOINT ["/opt/acido-venv/bin/acido"]'
             
         if cmd.startswith('['):
             cmd_line = f'CMD {cmd}'
@@ -1346,83 +1380,9 @@ class Acido(object):
         else:
             cmd_line = 'CMD ["sleep", "infinity"]'
         
-        # Determine binary name based on distro
-        if distro_info['type'] == 'alpine':
-            binary_name = 'acido-alpine-x86_64'
-        else:
-            # Use ubuntu binary for debian/rhel
-            binary_name = 'acido-ubuntu-x86_64'
-        
-        # Use latest version or specified version
-        version = acido_version if acido_version else __version__
-        download_url = f'https://github.com/merabytes/acido/releases/download/v{version}/{binary_name}'
-        
-        if distro_info['type'] == 'alpine':
-            # Build apk install command if packages are specified
-            pkg_install = ''
-            if validated_packages:
-                pkg_list = ' '.join(validated_packages)
-                update_cmd = '' if no_update else 'apk update && '
-                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apk add --no-cache {pkg_list}\n'
-            
-            return f"""FROM {base_image}
-{user_root_directive}
-# Install wget and ca-certificates for downloading acido binary
-RUN apk update && apk add --no-cache wget ca-certificates
-{pkg_install}
-# Download and install pre-built acido binary (lightweight, no Python needed)
-RUN wget -O /usr/local/bin/acido {download_url} && \\
-    chmod +x /usr/local/bin/acido && \\
-    /usr/local/bin/acido --version || echo "acido binary installed"
+        return entrypoint_line, cmd_line
 
-{entrypoint_line}
-{cmd_line}
-"""
-        elif distro_info['type'] == 'rhel':
-            pkg_manager = distro_info['pkg_manager']
-            if pkg_manager not in ['yum', 'dnf']:
-                pkg_manager = 'yum'
-            
-            pkg_install = ''
-            if validated_packages:
-                pkg_list = ' '.join(validated_packages)
-                pkg_install = f'\n# Install custom packages\nRUN {pkg_manager} install -y {pkg_list} && {pkg_manager} clean all\n'
-            
-            return f"""FROM {base_image}
-{user_root_directive}
-# Install wget and ca-certificates for downloading acido binary
-RUN {pkg_manager} install -y wget ca-certificates && {pkg_manager} clean all
-{pkg_install}
-# Download and install pre-built acido binary (lightweight, no Python needed)
-RUN wget -O /usr/local/bin/acido {download_url} && \\
-    chmod +x /usr/local/bin/acido && \\
-    /usr/local/bin/acido --version || echo "acido binary installed"
-
-{entrypoint_line}
-{cmd_line}
-"""
-        else:  # Debian/Ubuntu-based
-            pkg_install = ''
-            if validated_packages:
-                pkg_list = ' '.join(validated_packages)
-                update_cmd = '' if no_update else 'apt-get update && '
-                pkg_install = f'\n# Install custom packages\nRUN {update_cmd}apt-get install -y {pkg_list} && rm -rf /var/lib/apt/lists/*\n'
-            
-            return f"""FROM {base_image}
-{user_root_directive}
-# Install wget and ca-certificates for downloading acido binary
-RUN apt-get update && apt-get install -y wget ca-certificates && rm -rf /var/lib/apt/lists/*
-{pkg_install}
-# Download and install pre-built acido binary (lightweight, no Python needed)
-RUN wget -O /usr/local/bin/acido {download_url} && \\
-    chmod +x /usr/local/bin/acido && \\
-    /usr/local/bin/acido --version || echo "acido binary installed"
-
-{entrypoint_line}
-{cmd_line}
-"""
-
-    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
+    def _generate_dockerfile(self, base_image: str, distro_info: dict, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
         """Generate Dockerfile content based on distro and install custom packages."""
         
         # Validate all package names to prevent command injection
@@ -1443,28 +1403,8 @@ RUN wget -O /usr/local/bin/acido {download_url} && \\
         # This is needed for images that run as non-root by default (e.g., alpine/nikto)
         user_root_directive = '\n# Switch to root user for package installation\nUSER root\n' if run_as_root else ''
         
-        # Add --break-system-packages flag if needed (for PEP 668 externally managed environments)
-        pip_install_flags = '--break-system-packages ' if break_system_packages else ''
-        
-        # Set default ENTRYPOINT and CMD or use custom values
-        entrypoint = custom_entrypoint if custom_entrypoint is not None else '[]'
-        cmd = custom_cmd if custom_cmd is not None else '["sleep", "infinity"]'
-        
-        # Format entrypoint and cmd for Dockerfile
-        # If they look like JSON arrays, use as-is, otherwise treat as shell form
-        if entrypoint.startswith('['):
-            entrypoint_line = f'ENTRYPOINT {entrypoint}'
-        elif entrypoint:
-            entrypoint_line = f'ENTRYPOINT ["{entrypoint}"]'
-        else:
-            entrypoint_line = 'ENTRYPOINT []'
-            
-        if cmd.startswith('['):
-            cmd_line = f'CMD {cmd}'
-        elif cmd:
-            cmd_line = f'CMD ["{cmd}"]'
-        else:
-            cmd_line = 'CMD ["sleep", "infinity"]'
+        # Format entrypoint and cmd using helper method
+        entrypoint_line, cmd_line = self._format_entrypoint_and_cmd(custom_entrypoint, custom_cmd)
         
         if distro_info['type'] == 'alpine':
             # Build apk install command if packages are specified
@@ -1547,15 +1487,18 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
 {cmd_line}
 """
 
-    def create_acido_image_from_github(self, github_url: str, quiet: bool = False) -> str:
+    def create_acido_image_from_github(self, github_url: str, quiet: bool = False, custom_entrypoint: str = None, custom_cmd: str = None) -> str:
         """
         Create an acido-compatible Docker image from a GitHub repository.
         
-        The repository must contain a Dockerfile at the root.
+        The repository must contain a Dockerfile at the root. The Dockerfile will be modified
+        to install acido using a Python virtual environment at /opt/acido-venv.
         
         Args:
-            github_url: GitHub URL in git+https:// format (e.g., 'git+https://github.com/user/repo@branch')
+            github_url: GitHub URL in git+https:// format (e.g., 'git+https://github.com/user/repo[@ref]')
             quiet: Suppress verbose output and show progress bar
+            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile (default: /opt/acido-venv/bin/acido)
+            custom_cmd: Override the default CMD in the Dockerfile (default: sleep infinity)
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1594,66 +1537,118 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if not quiet:
                 print(bad(f'Invalid GitHub URL: {github_url}'))
                 print(info('Expected format: git+https://github.com/user/repo[@ref]'))
+                print(info('Examples:'))
+                print(info('  git+https://github.com/user/repo'))
+                print(info('  git+https://github.com/user/repo@main'))
+                print(info('  git+https://github.com/user/repo.git@v1.0.0'))
             return None
         
         if not quiet:
-            print(good(f'Cloning repository: {github_info["repo_url"]}'))
+            print(good(f'Repository: {github_info["repo_url"]}'))
             if github_info['ref']:
                 print(info(f'Using ref: {github_info["ref"]}'))
+            else:
+                print(info('Using default branch'))
         
         # Create temporary directory for cloning
         with tempfile.TemporaryDirectory() as tmpdir:
             repo_dir = os.path.join(tmpdir, 'repo')
             
-            # Clone the repository
+            # Clone the repository with improved error handling
+            clone_successful = False
+            
             if github_info['ref']:
-                # For refs (branch/tag/commit), we need different strategies
-                # Try clone with --branch first (works for branches and tags)
-                clone_cmd = ['git', 'clone', '--branch', github_info['ref'], github_info['repo_url'], repo_dir]
+                # Strategy 1: Try clone with --branch first (works for branches and tags)
+                clone_cmd = ['git', 'clone', '--depth', '1', '--branch', github_info['ref'], 
+                            github_info['repo_url'], repo_dir]
                 
                 if not quiet:
-                    print(info('Cloning repository...'))
+                    print(info(f'Attempting shallow clone with ref: {github_info["ref"]}...'))
                 
                 result = subprocess.run(clone_cmd, capture_output=True, text=True)
                 
-                # If --branch failed (e.g., commit SHA), clone the full repo and checkout
-                if result.returncode != 0:
+                if result.returncode == 0:
+                    clone_successful = True
                     if not quiet:
-                        print(info(f'Cloning full repository and checking out {github_info["ref"]}...'))
+                        print(good('Successfully cloned repository'))
+                else:
+                    # Strategy 2: If --branch failed (e.g., commit SHA), clone full repo
+                    if not quiet:
+                        print(info(f'Shallow clone failed, attempting full clone...'))
                     
-                    # Clone without --branch
                     clone_cmd = ['git', 'clone', github_info['repo_url'], repo_dir]
                     result = subprocess.run(clone_cmd, capture_output=True, text=True)
                     
                     if result.returncode != 0:
                         if not quiet:
-                            print(bad(f'Failed to clone repository:'))
-                            print(result.stderr)
+                            print(bad('Failed to clone repository'))
+                            print(bad(f'Command: {" ".join(clone_cmd)}'))
+                            if result.stderr:
+                                print(bad('Error output:'))
+                                for line in result.stderr.split('\n'):
+                                    if line.strip():
+                                        print(f'  {line}')
+                            print(info('Possible causes:'))
+                            print(info('  - Repository does not exist or is private'))
+                            print(info('  - Network connectivity issues'))
+                            print(info('  - Authentication required'))
                         return None
                     
-                    # Checkout specific ref (works for commit SHA)
+                    # Strategy 3: Checkout the specific ref
+                    if not quiet:
+                        print(info(f'Checking out ref: {github_info["ref"]}...'))
+                    
                     checkout_cmd = ['git', '-C', repo_dir, 'checkout', github_info['ref']]
                     result = subprocess.run(checkout_cmd, capture_output=True, text=True)
                     
                     if result.returncode != 0:
                         if not quiet:
-                            print(bad(f'Failed to checkout {github_info["ref"]}:'))
-                            print(result.stderr)
+                            print(bad(f'Failed to checkout ref: {github_info["ref"]}'))
+                            if result.stderr:
+                                print(bad('Error output:'))
+                                for line in result.stderr.split('\n'):
+                                    if line.strip():
+                                        print(f'  {line}')
+                            print(info('The specified ref might not exist in the repository'))
                         return None
+                    
+                    clone_successful = True
+                    if not quiet:
+                        print(good(f'Successfully checked out {github_info["ref"]}'))
+            
             else:
-                # No ref specified, clone default branch
-                clone_cmd = ['git', 'clone', github_info['repo_url'], repo_dir]
+                # No ref specified, clone default branch with shallow clone
+                clone_cmd = ['git', 'clone', '--depth', '1', github_info['repo_url'], repo_dir]
                 
                 if not quiet:
-                    print(info('Cloning repository...'))
+                    print(info('Cloning default branch...'))
                 
                 result = subprocess.run(clone_cmd, capture_output=True, text=True)
                 
                 if result.returncode != 0:
                     if not quiet:
-                        print(bad(f'Failed to clone repository:'))
-                        print(result.stderr)
+                        print(bad('Failed to clone repository'))
+                        print(bad(f'Command: {" ".join(clone_cmd)}'))
+                        if result.stderr:
+                            print(bad('Error output:'))
+                            for line in result.stderr.split('\n'):
+                                if line.strip():
+                                    print(f'  {line}')
+                        print(info('Possible causes:'))
+                        print(info('  - Repository does not exist or is private'))
+                        print(info('  - Network connectivity issues'))
+                        print(info('  - Authentication required'))
                     return None
+                
+                clone_successful = True
+                if not quiet:
+                    print(good('Successfully cloned repository'))
+            
+            # Verify clone was successful
+            if not clone_successful:
+                if not quiet:
+                    print(bad('Clone operation did not complete successfully'))
+                return None
             
             # Check if Dockerfile exists
             dockerfile_path = os.path.join(repo_dir, 'Dockerfile')
@@ -1661,20 +1656,97 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
                 if not quiet:
                     print(bad('No Dockerfile found in repository root'))
                     print(info('The repository must contain a Dockerfile at the root'))
+                    print(info(f'Searched path: {dockerfile_path}'))
                 return None
+            
+            if not quiet:
+                print(good('Found Dockerfile'))
+            
+            # Read and modify the Dockerfile to install acido
+            if not quiet:
+                print(info('Modifying Dockerfile to install acido...'))
+            
+            with open(dockerfile_path, 'r') as f:
+                original_dockerfile = f.read()
+            
+            # Detect the base image to determine distro type
+            base_image_match = re.search(r'^FROM\s+(\S+)', original_dockerfile, re.MULTILINE)
+            if not base_image_match:
+                if not quiet:
+                    print(bad('Could not find FROM statement in Dockerfile'))
+                return None
+            
+            base_image = base_image_match.group(1)
+            
+            # Detect distro type from base image
+            distro_info = self._detect_distro(base_image, quiet=True)
+            
+            # Generate acido installation instructions based on distro
+            if distro_info['type'] == 'alpine':
+                acido_install = '''
+# Install Python and acido in virtual environment
+RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers && \\
+    python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH
+ENV PATH="/opt/acido-venv/bin:$PATH"
+'''
+            elif distro_info['type'] == 'rhel':
+                pkg_manager = distro_info.get('pkg_manager', 'yum')
+                if pkg_manager not in ['yum', 'dnf']:
+                    pkg_manager = 'yum'
+                acido_install = f'''
+# Install Python and acido in virtual environment
+RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc python3-devel && {pkg_manager} clean all && \\
+    python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH
+ENV PATH="/opt/acido-venv/bin:$PATH"
+'''
+            else:  # Debian/Ubuntu-based
+                acido_install = '''
+# Install Python and acido in virtual environment
+RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/* && \\
+    python3 -m venv /opt/acido-venv && \\
+    /opt/acido-venv/bin/pip install --upgrade pip && \\
+    /opt/acido-venv/bin/pip install acido
+
+# Add virtual environment to PATH
+ENV PATH="/opt/acido-venv/bin:$PATH"
+'''
+            
+            # Format entrypoint and cmd using helper method
+            entrypoint_line, cmd_line = self._format_entrypoint_and_cmd(custom_entrypoint, custom_cmd)
+            
+            # Append acido installation and set entrypoint/cmd
+            modified_dockerfile = original_dockerfile + '\n' + acido_install + '\n' + entrypoint_line + '\n' + cmd_line + '\n'
+            
+            # Write modified Dockerfile
+            with open(dockerfile_path, 'w') as f:
+                f.write(modified_dockerfile)
+            
+            if not quiet:
+                print(good('Dockerfile modified successfully'))
             
             # Generate image name
             repo_name = github_info['repo_name']
             image_tag = github_info['ref'] if github_info['ref'] else 'latest'
+            
             # Sanitize tag for Docker compatibility
-            # Docker tags can only contain [a-zA-Z0-9._-]
-            # Replace any other character with hyphen and ensure it doesn't start/end with separator
+            # Docker tags can only contain [a-zA-Z0-9._-] and max 128 chars
             sanitized_tag = re.sub(r'[^a-zA-Z0-9._-]', '-', image_tag)
             # Remove leading/trailing separators
             sanitized_tag = sanitized_tag.strip('.-_')
             # Ensure tag is not empty
             if not sanitized_tag:
                 sanitized_tag = 'latest'
+            # Truncate if too long (Docker limit is 128 chars)
+            if len(sanitized_tag) > 128:
+                sanitized_tag = sanitized_tag[:128].rstrip('.-_')
             
             new_image_name = f"{self.image_registry_server}/{repo_name}-acido:{sanitized_tag}"
             
@@ -1682,78 +1754,106 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if not self._validate_image_name(new_image_name):
                 if not quiet:
                     print(bad(f'Generated invalid image name: {new_image_name}'))
+                    print(info('Please check your registry configuration'))
                 return None
             
             if not quiet:
-                print(good(f'Building image: {new_image_name}'))
+                print(good(f'Image name: {new_image_name}'))
+                print(info('Building Docker image...'))
             
             # Build the image
-            result = subprocess.run(
-                ['docker', 'build', '-t', new_image_name, repo_dir],
-                capture_output=True, text=True
-            )
+            build_cmd = ['docker', 'build', '-t', new_image_name, repo_dir]
+            result = subprocess.run(build_cmd, capture_output=True, text=True)
             
             if result.returncode != 0:
                 if not quiet:
-                    print(bad(f'Failed to build image:'))
-                    print(result.stderr)
+                    print(bad('Failed to build Docker image'))
+                    if result.stderr:
+                        print(bad('Build error output:'))
+                        for line in result.stderr.split('\n'):
+                            if line.strip():
+                                print(f'  {line}')
+                    if result.stdout:
+                        print(bad('Build stdout:'))
+                        for line in result.stdout.split('\n'):
+                            if line.strip():
+                                print(f'  {line}')
                 return None
             
             # Show build output only if not quiet
-            if not quiet and result.stdout:
-                for line in result.stdout.split('\n'):
-                    if line.strip():
-                        print(f'  {line}')
-            
             if not quiet:
-                print(good(f'Successfully built {new_image_name}'))
+                if result.stdout:
+                    for line in result.stdout.split('\n'):
+                        if line.strip():
+                            print(f'  {line}')
+                print(good('Successfully built Docker image'))
             
             # Login to registry
             if not quiet:
-                print(info(f'Logging in to registry...'))
-            result = subprocess.run(
-                ['docker', 'login', self.image_registry_server, '-u', self.image_registry_username, 
-                 '--password-stdin'],
+                print(info('Logging in to Azure Container Registry...'))
+            
+            login_result = subprocess.run(
+                ['docker', 'login', self.image_registry_server, 
+                '-u', self.image_registry_username, 
+                '--password-stdin'],
                 input=self.image_registry_password.encode(),
                 capture_output=True,
                 text=False
             )
             
-            if result.returncode != 0:
+            if login_result.returncode != 0:
                 if not quiet:
-                    print(bad(f'Failed to login to registry'))
+                    print(bad('Failed to login to registry'))
+                    if login_result.stderr:
+                        error_msg = login_result.stderr.decode('utf-8', errors='ignore')
+                        print(bad(f'Error: {error_msg}'))
+                    print(info('Please check your registry credentials'))
                 return None
+            
+            if not quiet:
+                print(good('Successfully logged in to registry'))
             
             # Push to registry
             if not quiet:
-                print(info(f'Pushing to registry...'))
-            result = subprocess.run(
+                print(info('Pushing image to registry...'))
+            
+            push_result = subprocess.run(
                 ['docker', 'push', new_image_name],
                 capture_output=True, text=True
             )
             
-            if result.returncode != 0:
+            if push_result.returncode != 0:
                 if not quiet:
-                    print(bad(f'Failed to push image:'))
-                    print(result.stderr)
+                    print(bad('Failed to push image to registry'))
+                    if push_result.stderr:
+                        print(bad('Push error output:'))
+                        for line in push_result.stderr.split('\n'):
+                            if line.strip():
+                                print(f'  {line}')
                 return None
             
             # Show push output only if not quiet
-            if not quiet and result.stdout:
-                for line in result.stdout.split('\n'):
-                    if line.strip():
-                        print(f'  {line}')
+            if not quiet:
+                if push_result.stdout:
+                    for line in push_result.stdout.split('\n'):
+                        if line.strip():
+                            print(f'  {line}')
+                print(good(f'Successfully pushed {new_image_name}'))
             
-            # Extract short name for user-friendly message
-            short_name = f"{repo_name}-acido:{image_tag}"
+            # Generate user-friendly short name
+            short_name = f"{repo_name}-acido:{sanitized_tag}"
             
             if not quiet:
-                print(good(f'Successfully pushed {new_image_name}'))
-                print(info(f'You can now use this image with: acido -f myfleet -im {short_name}'))
+                print('')
+                print(good('✓ Image creation completed successfully!'))
+                print(info(f'Image: {new_image_name}'))
+                print(info(f'Usage: acido -f myfleet -im {short_name}'))
+                print('')
             
             return new_image_name
 
-    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, break_system_packages: bool = False, custom_entrypoint: str = None, custom_cmd: str = None, use_venv: bool = False):
+
+    def create_acido_image(self, base_image: str, quiet: bool = False, install_packages: list = None, no_update: bool = False, run_as_root: bool = False, custom_entrypoint: str = None, custom_cmd: str = None):
         """
         Create an acido-compatible Docker image from a base image or GitHub repository.
         
@@ -1763,10 +1863,8 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             install_packages: List of packages to install (e.g., ['nmap', 'masscan']) - only applicable for base images, not GitHub URLs
             no_update: Skip package list update before installing packages - only applicable for base images
             run_as_root: Run package installation commands as root user (useful for images that run as non-root by default)
-            break_system_packages: [Deprecated] Use use_venv instead. Kept for backward compatibility
-            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile
-            custom_cmd: Override the default CMD in the Dockerfile
-            use_venv: Use Python virtual environment instead of pre-built binary (larger image, but more flexible)
+            custom_entrypoint: Override the default ENTRYPOINT in the Dockerfile (default: /opt/acido-venv/bin/acido)
+            custom_cmd: Override the default CMD in the Dockerfile (default: sleep infinity)
         
         Returns:
             str: The new image name if successful, None otherwise
@@ -1779,7 +1877,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             if run_as_root:
                 if not quiet:
                     print(orange('Warning: --root option is ignored when building from GitHub URL'))
-            return self.create_acido_image_from_github(base_image, quiet=quiet)
+            return self.create_acido_image_from_github(base_image, quiet=quiet, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
         
         # Validate Docker is available
         try:
@@ -1815,16 +1913,10 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             pbar.update(1)
             pbar.set_description("Generating Dockerfile")
         
-        # Generate Dockerfile content
-        # Use binary approach by default (lightweight), or venv if explicitly requested or if --break-system-packages is set (backward compat)
-        if use_venv or break_system_packages:
-            if not quiet:
-                print(info('Using virtual environment approach (larger image size)'))
-            dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root, break_system_packages, custom_entrypoint, custom_cmd)
-        else:
-            if not quiet:
-                print(info('Using pre-built binary approach (lightweight image)'))
-            dockerfile_content = self._generate_dockerfile_with_binary(base_image, distro_info, install_packages, no_update, run_as_root, custom_entrypoint, custom_cmd)
+        # Generate Dockerfile content using venv approach (always)
+        if not quiet:
+            print(info('Using virtual environment approach'))
+        dockerfile_content = self._generate_dockerfile(base_image, distro_info, install_packages, no_update, run_as_root, custom_entrypoint, custom_cmd)
         
         # Create temporary directory and Dockerfile
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -2025,11 +2117,9 @@ def main():
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)
         run_as_root = getattr(args, 'run_as_root', False)
-        break_system_packages = getattr(args, 'break_system_packages', False)
         custom_entrypoint = getattr(args, 'custom_entrypoint', None)
         custom_cmd = getattr(args, 'custom_cmd', None)
-        use_venv = getattr(args, 'use_venv', False)
-        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, break_system_packages=break_system_packages, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd, use_venv=use_venv)
+        acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd)
 
 if __name__ == "__main__":
     main()

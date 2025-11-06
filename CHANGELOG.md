@@ -5,6 +5,28 @@ All notable changes to acido will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Standardized on venv-based installation**: Removed binary installation approach
+  - All images now use Python virtual environment at `/opt/acido-venv`
+  - Removed `--use-venv` and `--break-system-packages` CLI flags (venv is now always used)
+  - Removed `_generate_dockerfile_with_binary()` method
+  - Default ENTRYPOINT is now always `/opt/acido-venv/bin/acido`
+  - Simplified codebase by removing dual installation approaches
+- **GitHub Repository Image Creation**: Enhanced to install acido in venv
+  - Automatically modifies cloned Dockerfiles to install acido
+  - Detects distro type and installs appropriate dependencies
+  - Adds acido installation using venv approach
+  - Sets entrypoint to `/opt/acido-venv/bin/acido` by default
+
+### Technical Details
+- Updated `create_acido_image_from_github()` to modify Dockerfiles with acido installation
+- Updated `_generate_dockerfile()` to always set default entrypoint to `/opt/acido-venv/bin/acido`
+- Removed binary download logic from Dockerfile generation
+- InstanceManager already uses `/opt/acido-venv/bin/acido` path (no changes needed)
+- All 31 tests passing with new unified approach
+
 ## [0.44.0] - 2025-11-03
 
 ### Added

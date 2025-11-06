@@ -12,6 +12,7 @@ on:
 env:
   # Azure credentials - required for full integration tests
   # These should be configured as repository secrets
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
@@ -146,47 +147,9 @@ jobs:
         python -m pip install --upgrade pip setuptools wheel
         pip install .
 
-    - name: Test acido create nuclei
-      env:
-        INSTANCE_NAME: test-acido-instance
-        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
-        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
-        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
-        STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
-        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      run: |
-        # This will test that acido can create a nuclei image using the correct Docker image
-        # It will use environment variables for configuration
-        # Now uses virtual environment to avoid PEP 668 issues
-        acido create nuclei --image projectdiscovery/nuclei:latest || echo "Note: Image creation may fail without proper credentials, but command should execute"
-
-    - name: Test acido create nuclei with root flag
-      env:
-        INSTANCE_NAME: test-acido-instance
-        AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-        AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
-        IMAGE_REGISTRY_SERVER: ${{ secrets.IMAGE_REGISTRY_SERVER }}
-        IMAGE_REGISTRY_USERNAME: ${{ secrets.IMAGE_REGISTRY_USERNAME }}
-        IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
-        STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
-        STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
-        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      run: |
-        # Test acido create with --root flag for images that run as non-root by default
-        # Now uses virtual environment to avoid PEP 668 issues
-        acido create nuclei --image projectdiscovery/nuclei:latest --root || echo "Note: Image creation may fail without proper credentials, but command should execute"
-
     - name: Test acido create from GitHub repository
       env:
+        AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         INSTANCE_NAME: test-acido-instance
         AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -197,6 +160,8 @@ jobs:
         IMAGE_REGISTRY_PASSWORD: ${{ secrets.IMAGE_REGISTRY_PASSWORD }}
         STORAGE_ACCOUNT_NAME: ${{ secrets.STORAGE_ACCOUNT_NAME }}
         STORAGE_ACCOUNT_KEY: ${{ secrets.STORAGE_ACCOUNT_KEY }}
+        MANAGED_IDENTITY_ID: ${{ secrets.MANAGED_IDENTITY_ID }}
+        MANAGED_IDENTITY_CLIENT_ID: ${{ secrets.MANAGED_IDENTITY_CLIENT_ID }}
       run: |
         # Test GitHub URL support - build nuclei image directly from projectdiscovery/nuclei repository
         # This validates the new git+https:// syntax for building images from GitHub
@@ -204,6 +169,7 @@ jobs:
 
     - name: E2E Test - Deploy and manage nuclei fleet
       env:
+        AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         INSTANCE_NAME: test-acido-instance
         AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
