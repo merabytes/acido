@@ -1,7 +1,7 @@
 # Multi-Region Support Implementation Summary
 
 ## Overview
-Successfully implemented multi-region support for acido to enable scaling beyond Azure's per-region container limits. The system can now deploy 1000+ containers across all 48 Azure regions.
+Successfully implemented multi-region support for acido to enable scaling beyond Azure's per-region container limits. The system can now deploy 1000+ containers across all 47 Azure regions.
 
 ## Problem Statement
 Azure Container Instances limits each region to approximately 20 container instances with caps of:
@@ -21,9 +21,9 @@ Implemented random region distribution where each container group (max 10 instan
 acido fleet scan -n 100 -im nuclei -t 'nuclei -list input' -i targets.txt \
   --region westeurope --region eastus --region westus2
 
-# Deploy across ALL 48 regions for maximum scale
+# Deploy across ALL 47 regions for maximum scale
 acido fleet massive-scan -n 1000 -im nuclei [...] \
-  --region australiacentral --region australiaeast [... all 48 regions ...]
+  --region australiacentral --region australiaeast [... all 47 regions ...]
 ```
 
 ### 2. Lambda Support
@@ -44,13 +44,13 @@ acido fleet massive-scan -n 1000 -im nuclei [...] \
 
 ## Implementation Details
 
-### Region List (48 Total)
+### Region List (47 Total)
 ```
 australiacentral, australiaeast, australiasoutheast,
 austriaeast, belgiumcentral, brazilsouth, canadacentral, canadaeast,
 centralindia, centralus, chilecentral, eastasia, eastus, eastus2,
 francecentral, germanywestcentral, indonesiacentral, israelcentral,
-italynorth, japaneast, japanwest, jioindiawest, koreacentral, koreasouth,
+italynorth, japaneast, japanwest, koreacentral, koreasouth,
 malaysiawest, mexicocentral, newzealandnorth, northcentralus, northeurope,
 norwayeast, polandcentral, qatarcentral, southafricanorth, southcentralus,
 southeastasia, southindia, spaincentral, swedencentral, switzerlandnorth,
@@ -89,10 +89,10 @@ Else:
     Deploy all instances to that region
 ```
 
-### Example: 1000 instances across 48 regions
+### Example: 1000 instances across 47 regions
 - Creates 100 container groups (1000 / 10 = 100)
-- Each group randomly assigned to one of 48 regions
-- Approximate distribution: ~20-21 instances per region
+- Each group randomly assigned to one of 47 regions
+- Approximate distribution: ~21-22 instances per region
 - Well within the 20 instance per region limit
 
 ## Testing
@@ -109,7 +109,7 @@ Simulation script demonstrated:
 - 10 instances → 1 group in random region
 - 50 instances across 5 regions → 5 groups
 - 200 instances across 10 regions → 20 groups
-- **1000 instances across 48 regions → 100 groups**
+- **1000 instances across 47 regions → 100 groups**
 
 ## Benefits
 
@@ -173,4 +173,4 @@ Possible improvements (not in this PR):
 - Cost-based region selection
 
 ## Conclusion
-Successfully implemented multi-region support enabling acido to scale to 1000+ containers across 48 Azure regions while maintaining full backward compatibility.
+Successfully implemented multi-region support enabling acido to scale to 1000+ containers across 47 Azure regions while maintaining full backward compatibility.

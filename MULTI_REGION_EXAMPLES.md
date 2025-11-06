@@ -16,7 +16,7 @@ acido fleet nuclei-scan \
   --region westus2
 ```
 
-### Fleet command with all 48 regions for maximum scale
+### Fleet command with all 47 regions for maximum scale
 
 ```bash
 # Deploy 1000 containers across all Azure regions
@@ -46,7 +46,6 @@ acido fleet massive-scan \
   --region italynorth \
   --region japaneast \
   --region japanwest \
-  --region jioindiawest \
   --region koreacentral \
   --region koreasouth \
   --region malaysiawest \
@@ -135,13 +134,13 @@ acido run github-runner-01 \
 
 ## Region List
 
-All 48 supported Azure regions:
+All 47 supported Azure regions:
 
 - australiacentral, australiaeast, australiasoutheast
 - austriaeast, belgiumcentral, brazilsouth, canadacentral, canadaeast
 - centralindia, centralus, chilecentral, eastasia, eastus, eastus2
 - francecentral, germanywestcentral, indonesiacentral, israelcentral
-- italynorth, japaneast, japanwest, jioindiawest, koreacentral, koreasouth
+- italynorth, japaneast, japanwest, koreacentral, koreasouth
 - malaysiawest, mexicocentral, newzealandnorth, northcentralus, northeurope
 - norwayeast, polandcentral, qatarcentral, southafricanorth, southcentralus
 - southeastasia, southindia, spaincentral, swedencentral, switzerlandnorth

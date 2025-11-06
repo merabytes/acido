@@ -30,13 +30,13 @@ __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 # Constants
 ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
 
-# List of all supported Azure regions
+# List of all supported Azure regions (47 total)
 AZURE_REGIONS = [
     'australiacentral', 'australiaeast', 'australiasoutheast',
     'austriaeast', 'belgiumcentral', 'brazilsouth', 'canadacentral', 'canadaeast',
     'centralindia', 'centralus', 'chilecentral', 'eastasia', 'eastus', 'eastus2',
     'francecentral', 'germanywestcentral', 'indonesiacentral', 'israelcentral',
-    'italynorth', 'japaneast', 'japanwest', 'jioindiawest', 'koreacentral', 'koreasouth',
+    'italynorth', 'japaneast', 'japanwest', 'koreacentral', 'koreasouth',
     'malaysiawest', 'mexicocentral', 'newzealandnorth', 'northcentralus', 'northeurope',
     'norwayeast', 'polandcentral', 'qatarcentral', 'southafricanorth', 'southcentralus',
     'southeastasia', 'southindia', 'spaincentral', 'swedencentral', 'switzerlandnorth',
