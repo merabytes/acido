@@ -6,12 +6,11 @@ import sys
 import tempfile
 import random
 from beaupy import select
-from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.ManagedIdentity import ManagedIdentity
 from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import InstanceManager
-from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
+from acido.azure_utils.NetworkManager import NetworkManager
 from acido.utils.functions import chunks, jpath, expanduser, split_file
 from acido.utils.lambda_safe_pool import ThreadPoolShim
 from huepy import good, bad, info, bold, green, red, orange
@@ -349,7 +348,13 @@ class Acido(object):
         self.storage_account = None
         self.user_assigned = {}
         self.rg = None
-        self.network_profile = None
+        
+        # NEW: Network configuration using subnet delegation instead of NetworkProfile
+        self.public_ip_name = None
+        self.public_ip_id = None
+        self.vnet_name = None
+        self.subnet_name = None
+        self.subnet_id = None
 
         if rg:
             self.rg = rg
@@ -420,7 +425,7 @@ class Acido(object):
                 print(info('Continuing without user-assigned identity. Some features may not work.'))
 
 
-        im = InstanceManager(self.rg, login, self.user_assigned, self.network_profile)
+        im = InstanceManager(self.rg, login, self.user_assigned)
         im.login_image_registry(
             self.image_registry_server, 
             self.image_registry_username, 
@@ -441,8 +446,6 @@ class Acido(object):
 
         if args.ipv4_address:
             self.select_ipv4_address()
-        
-        self.instance_manager.network_profile = self.network_profile
 
 
     def _save_config(self):
@@ -455,7 +458,12 @@ class Acido(object):
             'image_registry_server': self.image_registry_server,
             'storage_account': self.storage_account,
             'user_assigned_id': self.user_assigned,
-            'network_profile': self.network_profile
+            # NEW: Store network configuration
+            'public_ip_name': self.public_ip_name,
+            'public_ip_id': self.public_ip_id,
+            'vnet_name': self.vnet_name,
+            'subnet_name': self.subnet_name,
+            'subnet_id': self.subnet_id,
         }
 
         try:
@@ -493,41 +501,24 @@ class Acido(object):
             print(bad("Network manager is not initialized. Please provide a resource group."))
             return
         
-        # Step 0: Delete NetworkProfile
-        # self.network_manager.delete_resources(public_ip_name)
+        # 1) Create the Public IP Address
+        pip_id = self.network_manager.create_ipv4(public_ip_name)
 
-        # Step 1: Create a new Public IP Address
-        ipv4_address_id = self.network_manager.create_ipv4(public_ip_name)
-
-        # Step 2: Create a Virtual Network
+        # 2) Create VNet + Subnet with NAT Gateway using that IP
         vnet_name = f'{public_ip_name}-vnet'
         subnet_name = f'{public_ip_name}-subnet'
-        vnet_params = self.network_manager.create_virtual_network(vnet_name)
-        subnet_params = self.network_manager.create_subnet(vnet_name, subnet_name, ip_address=ipv4_address_id)
+        self.network_manager.create_virtual_network(vnet_name)
+        subnet = self.network_manager.create_subnet(vnet_name, subnet_name, public_ip_id=pip_id, subnet_cidr="10.0.1.0/24")
 
-        # Step 3: Create a Network Profile
-        network_profile_name = f'{public_ip_name}-network-profile'
-        container_network_interface_config = ContainerNetworkInterfaceConfiguration(
-            name=f'{public_ip_name}-cnic',
-            ip_configurations=[
-                IPConfigurationProfile(
-                    name=f'{public_ip_name}-ip-config',
-                    subnet=subnet_params
-                )
-            ]
-        )
-        network_profile_params = NetworkProfile(
-            location='westeurope',  # replace 'your-location' with your actual Azure location
-            container_network_interface_configurations=[container_network_interface_config]
-        )
-        network_profile = self.network_manager.create_network_profile(
-            network_profile_name, network_profile_params)
-        
-        self.network_profile = {'id': network_profile.id}
+        # 3) Save config (names + IDs)
+        self.public_ip_name = public_ip_name
+        self.public_ip_id = pip_id
+        self.vnet_name = vnet_name
+        self.subnet_name = subnet_name
+        self.subnet_id = subnet.id
 
         self._save_config()
-
-        print(good(f"Network Profile {network_profile_name} created successfully."))
+        print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
 
 
     def select_ipv4_address(self):
@@ -537,21 +528,37 @@ class Acido(object):
         
         ip_addresses_info = self.network_manager.list_ipv4()
         
-        # Create a list of IP addresses and an associated descriptive list
-        ip_addresses = [info['ip_address'] for info in ip_addresses_info if info['ip_address']]  # Filter out None values
-        ip_descriptions = [f"{info['name']} ({info['ip_address']})" for info in ip_addresses_info if info['ip_address']]  # Filter out None values
+        # Filter out IPs without addresses (still provisioning)
+        ip_addresses_info = [info for info in ip_addresses_info if info['ip_address']]
         
-        # Now use beaupy to create an interactive selector.
+        if not ip_addresses_info:
+            print(info("No IPv4 addresses found."))
+            return
+        
+        # Create descriptive list
+        ip_descriptions = [f"{info['name']} ({info['ip_address']})" for info in ip_addresses_info]
+        
+        # Interactive selector
         print(good("Please select an IP address:"))
         selected_description = select(ip_descriptions, cursor_style="cyan")
         
-        # Extract the selected IP address from the description
-        selected_ip_address = selected_description.split(' ')[-1][1:-1]  # Assumes the format is 'name (ip_address)'
-        network_profile_prefix = selected_description.split(' ')[0]  # Assumes the format is 'name (ip_address)'
-        self.network_profile = {'id': self.network_manager.get_network_profile(resource_name=network_profile_prefix).id}
-        self._save_config()
+        # Extract selected info
+        selected_ip_address = selected_description.split(' ')[-1][1:-1]  # Extract IP from (ip_address)
+        name = selected_description.split(' ')[0]  # Extract name
         
-        print(good(f"You selected IP address: {selected_ip_address} from network profile {self.network_profile}"))
+        chosen = next(x for x in ip_addresses_info if x['name'] == name)
+        
+        self.public_ip_name = name
+        self.public_ip_id = chosen['id']
+        
+        # Assume naming convention for vnet/subnet
+        self.vnet_name = f"{name}-vnet"
+        self.subnet_name = f"{name}-subnet"
+        # subnet_id will be constructed when needed
+        self.subnet_id = None
+        
+        self._save_config()
+        print(good(f"You selected IP address: {selected_ip_address} (name: {name})"))
 
     def ls_ip(self, interactive=True):
         """List all IPv4 addresses and network profiles."""
@@ -573,18 +580,24 @@ class Acido(object):
         return None if interactive else ip_addresses_info
 
     def rm_ip(self, name):
-        """Remove IPv4 address and associated network resources."""
+        """Remove IPv4 address and associated network resources (NAT GW, subnet, VNet)."""
         if self.network_manager is None:
             print(bad("Network manager is not initialized. Please provide a resource group."))
             return False
         
         try:
-            # Delete network profile, subnet, vnet, and public IP
-            self.network_manager.delete_resources(name)
+            # Note: Ensure no container groups are using the subnet before deletion
+            vnet_name = f'{name}-vnet'
+            subnet_name = f'{name}-subnet'
+            self.network_manager.delete_stack(name, vnet_name, subnet_name)
             
-            # Clear network_profile in config if it matches the deleted one
-            if self.network_profile and name in str(self.network_profile.get('id', '')):
-                self.network_profile = None
+            # Clear config if it matches
+            if self.public_ip_name == name:
+                self.public_ip_name = None
+                self.public_ip_id = None
+                self.vnet_name = None
+                self.subnet_name = None
+                self.subnet_id = None
                 self._save_config()
             
             print(good(f"Successfully removed IPv4 address and network resources: {name}"))
@@ -694,7 +707,8 @@ class Acido(object):
                             image_name=image_name,
                             input_files=input_files,
                             command=scan_cmd,
-                            network_profile=self.network_profile,
+                            vnet_name=self.vnet_name,
+                            subnet_name=self.subnet_name,
                             env_vars=env_vars,
                             quiet=quiet,
                             location=selected_region)
@@ -728,7 +742,8 @@ class Acido(object):
                 image_name=image_name,
                 command=scan_cmd,
                 env_vars=env_vars,
-                network_profile=self.network_profile,
+                vnet_name=self.vnet_name,
+                subnet_name=self.subnet_name,
                 input_files=input_files,
                 quiet=quiet,
                 location=selected_region)
@@ -892,7 +907,8 @@ class Acido(object):
             image_name=image_name,
             command=task,
             env_vars=env_vars,
-            network_profile=self.network_profile,
+            vnet_name=self.vnet_name,
+            subnet_name=self.subnet_name,
             input_files=None,
             quiet=quiet,
             location=selected_region
