@@ -80,6 +80,17 @@ class NetworkManager(ManagedIdentity):
         Delete in order: NAT GW -> Subnet -> VNet -> Public IP.
         (Requires that no container groups are using the subnet).
         """
+        # Subnet
+        try:
+            print(good(f"Deleting Subnet: {subnet_name}..."))
+            self._client.subnets.begin_delete(
+                self.resource_group, vnet_name, subnet_name
+            ).result()
+            print(good(f"Subnet {subnet_name} deleted successfully."))
+        except Exception as e:
+            print(good(f"Subnet {subnet_name} not found or already deleted."))
+        
+
         # NAT Gateway
         nat_gw_name = f'{subnet_name}-nat-gw'
         try:
@@ -90,16 +101,6 @@ class NetworkManager(ManagedIdentity):
             print(good(f"NAT Gateway {nat_gw_name} deleted successfully."))
         except Exception as e:
             print(good(f"NAT Gateway {nat_gw_name} not found or already deleted."))
-        
-        # Subnet
-        try:
-            print(good(f"Deleting Subnet: {subnet_name}..."))
-            self._client.subnets.begin_delete(
-                self.resource_group, vnet_name, subnet_name
-            ).result()
-            print(good(f"Subnet {subnet_name} deleted successfully."))
-        except Exception as e:
-            print(good(f"Subnet {subnet_name} not found or already deleted."))
         
         # VNet
         try:
