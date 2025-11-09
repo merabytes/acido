@@ -81,32 +81,45 @@ class NetworkManager(ManagedIdentity):
         (Requires that no container groups are using the subnet).
         """
         # NAT Gateway
+        nat_gw_name = f'{subnet_name}-nat-gw'
         try:
+            print(good(f"Deleting NAT Gateway: {nat_gw_name}..."))
             self._client.nat_gateways.begin_delete(
-                self.resource_group, f'{subnet_name}-nat-gw'
+                self.resource_group, nat_gw_name
             ).result()
-        except Exception:
-            pass
+            print(good(f"NAT Gateway {nat_gw_name} deleted successfully."))
+        except Exception as e:
+            print(good(f"NAT Gateway {nat_gw_name} not found or already deleted."))
+        
         # Subnet
         try:
+            print(good(f"Deleting Subnet: {subnet_name}..."))
             self._client.subnets.begin_delete(
                 self.resource_group, vnet_name, subnet_name
             ).result()
-        except Exception:
-            pass
+            print(good(f"Subnet {subnet_name} deleted successfully."))
+        except Exception as e:
+            print(good(f"Subnet {subnet_name} not found or already deleted."))
+        
         # VNet
         try:
+            print(good(f"Deleting Virtual Network: {vnet_name}..."))
             self._client.virtual_networks.begin_delete(
                 self.resource_group, vnet_name
             ).result()
-        except Exception:
-            pass
+            print(good(f"Virtual Network {vnet_name} deleted successfully."))
+        except Exception as e:
+            print(good(f"Virtual Network {vnet_name} not found or already deleted."))
+        
         # Public IP
         try:
+            print(good(f"Deleting Public IP: {public_ip_name}..."))
             self._client.public_ip_addresses.begin_delete(
                 self.resource_group, public_ip_name
             ).result()
-        except Exception:
-            pass
+            print(good(f"Public IP {public_ip_name} deleted successfully."))
+        except Exception as e:
+            print(good(f"Public IP {public_ip_name} not found or already deleted."))
+        
         return True
 
