@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acido-client"
-version = "0.40.2"
+version = "0.50.0"
 description = "REST API client for acido Lambda functions"
 readme = "README.md"
 requires-python = ">=3.8"
