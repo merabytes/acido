@@ -4,13 +4,13 @@ import subprocess
 import getpass
 import sys
 import tempfile
+import random
 from beaupy import select
-from azure.mgmt.network.models import ContainerNetworkInterfaceConfiguration, IPConfigurationProfile
 from azure.mgmt.storage import StorageManagementClient
 from acido.azure_utils.ManagedIdentity import ManagedIdentity
 from acido.azure_utils.BlobManager import BlobManager
 from acido.azure_utils.InstanceManager import InstanceManager
-from acido.azure_utils.NetworkManager import NetworkManager, NetworkProfile
+from acido.azure_utils.NetworkManager import NetworkManager
 from acido.utils.functions import chunks, jpath, expanduser, split_file
 from acido.utils.lambda_safe_pool import ThreadPoolShim
 from huepy import good, bad, info, bold, green, red, orange
@@ -28,6 +28,51 @@ __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 
 # Constants
 ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
+
+# List of all supported Azure regions (47 total)
+AZURE_REGIONS = [
+    'australiacentral', 'australiaeast', 'australiasoutheast',
+    'austriaeast', 'belgiumcentral', 'brazilsouth', 'canadacentral', 'canadaeast',
+    'centralindia', 'centralus', 'chilecentral', 'eastasia', 'eastus', 'eastus2',
+    'francecentral', 'germanywestcentral', 'indonesiacentral', 'israelcentral',
+    'italynorth', 'japaneast', 'japanwest', 'koreacentral', 'koreasouth',
+    'malaysiawest', 'mexicocentral', 'newzealandnorth', 'northcentralus', 'northeurope',
+    'norwayeast', 'polandcentral', 'qatarcentral', 'southafricanorth', 'southcentralus',
+    'southeastasia', 'southindia', 'spaincentral', 'swedencentral', 'switzerlandnorth',
+    'uaenorth', 'uksouth', 'ukwest', 'westcentralus', 'westeurope', 'westindia', 'westus',
+    'westus2', 'westus3'
+]
+
+def validate_regions(regions):
+    """
+    Validate that all provided regions are in the supported list.
+    
+    Args:
+        regions: List of region names to validate
+        
+    Returns:
+        tuple: (is_valid, invalid_regions) where is_valid is bool and invalid_regions is list
+    """
+    if not regions:
+        return True, []
+    
+    invalid = [r for r in regions if r not in AZURE_REGIONS]
+    return len(invalid) == 0, invalid
+
+def select_random_region(regions):
+    """
+    Select a random region from the provided list.
+    If regions is None or empty, use westeurope as default.
+    
+    Args:
+        regions: List of region names or None
+        
+    Returns:
+        str: Selected region name
+    """
+    if not regions:
+        return 'westeurope'
+    return random.choice(regions)
 
 parser = argparse.ArgumentParser()
 
@@ -60,7 +105,7 @@ fleet_parser.add_argument('-o', '--output', dest='write_to_file', help='Save out
 fleet_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
 fleet_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 fleet_parser.add_argument('--rm-when-done', dest='rm_when_done', action='store_true', help='Remove after completion')
-fleet_parser.add_argument('--region', dest='region', required=True, help='Azure region (e.g., westeurope, eastus)')
+fleet_parser.add_argument('--region', dest='region', action='append', help='Azure region (e.g., westeurope, eastus). Can be specified multiple times for multi-region deployment.')
 
 # Run subcommand (ephemeral single instance with auto-cleanup)
 run_parser = subparsers.add_parser('run', help='Run a single ephemeral container instance with auto-cleanup after specified duration')
@@ -72,7 +117,7 @@ run_parser.add_argument('-o', '--output', dest='write_to_file', help='Save outpu
 run_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
 run_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 run_parser.add_argument('--no-cleanup', dest='no_cleanup', action='store_true', help='Skip auto-cleanup after duration')
-run_parser.add_argument('--region', dest='region', required=True, help='Azure region (e.g., westeurope, eastus)')
+run_parser.add_argument('--region', dest='region', action='append', help='Azure region (e.g., westeurope, eastus). Can be specified multiple times.')
 
 # List subcommand (Docker-like: acido ls)
 ls_parser = subparsers.add_parser('ls', help='List all container instances')
@@ -303,7 +348,13 @@ class Acido(object):
         self.storage_account = None
         self.user_assigned = {}
         self.rg = None
-        self.network_profile = None
+        
+        # NEW: Network configuration using subnet delegation instead of NetworkProfile
+        self.public_ip_name = None
+        self.public_ip_id = None
+        self.vnet_name = None
+        self.subnet_name = None
+        self.subnet_id = None
 
         if rg:
             self.rg = rg
@@ -374,7 +425,7 @@ class Acido(object):
                 print(info('Continuing without user-assigned identity. Some features may not work.'))
 
 
-        im = InstanceManager(self.rg, login, self.user_assigned, self.network_profile)
+        im = InstanceManager(self.rg, login, self.user_assigned)
         im.login_image_registry(
             self.image_registry_server, 
             self.image_registry_username, 
@@ -395,8 +446,6 @@ class Acido(object):
 
         if args.ipv4_address:
             self.select_ipv4_address()
-        
-        self.instance_manager.network_profile = self.network_profile
 
 
     def _save_config(self):
@@ -409,7 +458,12 @@ class Acido(object):
             'image_registry_server': self.image_registry_server,
             'storage_account': self.storage_account,
             'user_assigned_id': self.user_assigned,
-            'network_profile': self.network_profile
+            # NEW: Store network configuration
+            'public_ip_name': self.public_ip_name,
+            'public_ip_id': self.public_ip_id,
+            'vnet_name': self.vnet_name,
+            'subnet_name': self.subnet_name,
+            'subnet_id': self.subnet_id,
         }
 
         try:
@@ -447,41 +501,24 @@ class Acido(object):
             print(bad("Network manager is not initialized. Please provide a resource group."))
             return
         
-        # Step 0: Delete NetworkProfile
-        # self.network_manager.delete_resources(public_ip_name)
+        # 1) Create the Public IP Address
+        pip_id = self.network_manager.create_ipv4(public_ip_name)
 
-        # Step 1: Create a new Public IP Address
-        ipv4_address_id = self.network_manager.create_ipv4(public_ip_name)
-
-        # Step 2: Create a Virtual Network
+        # 2) Create VNet + Subnet with NAT Gateway using that IP
         vnet_name = f'{public_ip_name}-vnet'
         subnet_name = f'{public_ip_name}-subnet'
-        vnet_params = self.network_manager.create_virtual_network(vnet_name)
-        subnet_params = self.network_manager.create_subnet(vnet_name, subnet_name, ip_address=ipv4_address_id)
+        self.network_manager.create_virtual_network(vnet_name)
+        subnet = self.network_manager.create_subnet(vnet_name, subnet_name, public_ip_id=pip_id, subnet_cidr="10.0.1.0/24")
 
-        # Step 3: Create a Network Profile
-        network_profile_name = f'{public_ip_name}-network-profile'
-        container_network_interface_config = ContainerNetworkInterfaceConfiguration(
-            name=f'{public_ip_name}-cnic',
-            ip_configurations=[
-                IPConfigurationProfile(
-                    name=f'{public_ip_name}-ip-config',
-                    subnet=subnet_params
-                )
-            ]
-        )
-        network_profile_params = NetworkProfile(
-            location='westeurope',  # replace 'your-location' with your actual Azure location
-            container_network_interface_configurations=[container_network_interface_config]
-        )
-        network_profile = self.network_manager.create_network_profile(
-            network_profile_name, network_profile_params)
-        
-        self.network_profile = {'id': network_profile.id}
+        # 3) Save config (names + IDs)
+        self.public_ip_name = public_ip_name
+        self.public_ip_id = pip_id
+        self.vnet_name = vnet_name
+        self.subnet_name = subnet_name
+        self.subnet_id = subnet.id
 
         self._save_config()
-
-        print(good(f"Network Profile {network_profile_name} created successfully."))
+        print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
 
 
     def select_ipv4_address(self):
@@ -491,21 +528,37 @@ class Acido(object):
         
         ip_addresses_info = self.network_manager.list_ipv4()
         
-        # Create a list of IP addresses and an associated descriptive list
-        ip_addresses = [info['ip_address'] for info in ip_addresses_info if info['ip_address']]  # Filter out None values
-        ip_descriptions = [f"{info['name']} ({info['ip_address']})" for info in ip_addresses_info if info['ip_address']]  # Filter out None values
+        # Filter out IPs without addresses (still provisioning)
+        ip_addresses_info = [info for info in ip_addresses_info if info['ip_address']]
         
-        # Now use beaupy to create an interactive selector.
+        if not ip_addresses_info:
+            print(info("No IPv4 addresses found."))
+            return
+        
+        # Create descriptive list
+        ip_descriptions = [f"{info['name']} ({info['ip_address']})" for info in ip_addresses_info]
+        
+        # Interactive selector
         print(good("Please select an IP address:"))
         selected_description = select(ip_descriptions, cursor_style="cyan")
         
-        # Extract the selected IP address from the description
-        selected_ip_address = selected_description.split(' ')[-1][1:-1]  # Assumes the format is 'name (ip_address)'
-        network_profile_prefix = selected_description.split(' ')[0]  # Assumes the format is 'name (ip_address)'
-        self.network_profile = {'id': self.network_manager.get_network_profile(resource_name=network_profile_prefix).id}
-        self._save_config()
+        # Extract selected info
+        selected_ip_address = selected_description.split(' ')[-1][1:-1]  # Extract IP from (ip_address)
+        name = selected_description.split(' ')[0]  # Extract name
         
-        print(good(f"You selected IP address: {selected_ip_address} from network profile {self.network_profile}"))
+        chosen = next(x for x in ip_addresses_info if x['name'] == name)
+        
+        self.public_ip_name = name
+        self.public_ip_id = chosen['id']
+        
+        # Assume naming convention for vnet/subnet
+        self.vnet_name = f"{name}-vnet"
+        self.subnet_name = f"{name}-subnet"
+        # subnet_id will be constructed when needed
+        self.subnet_id = None
+        
+        self._save_config()
+        print(good(f"You selected IP address: {selected_ip_address} (name: {name})"))
 
     def ls_ip(self, interactive=True):
         """List all IPv4 addresses and network profiles."""
@@ -527,18 +580,24 @@ class Acido(object):
         return None if interactive else ip_addresses_info
 
     def rm_ip(self, name):
-        """Remove IPv4 address and associated network resources."""
+        """Remove IPv4 address and associated network resources (NAT GW, subnet, VNet)."""
         if self.network_manager is None:
             print(bad("Network manager is not initialized. Please provide a resource group."))
             return False
         
         try:
-            # Delete network profile, subnet, vnet, and public IP
-            self.network_manager.delete_resources(name)
+            # Note: Ensure no container groups are using the subnet before deletion
+            vnet_name = f'{name}-vnet'
+            subnet_name = f'{name}-subnet'
+            self.network_manager.delete_stack(name, vnet_name, subnet_name)
             
-            # Clear network_profile in config if it matches the deleted one
-            if self.network_profile and name in str(self.network_profile.get('id', '')):
-                self.network_profile = None
+            # Clear config if it matches
+            if self.public_ip_name == name:
+                self.public_ip_name = None
+                self.public_ip_id = None
+                self.vnet_name = None
+                self.subnet_name = None
+                self.subnet_id = None
                 self._save_config()
             
             print(good(f"Successfully removed IPv4 address and network resources: {name}"))
@@ -575,9 +634,30 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, region='westeurope'):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, regions=None):
+        """
+        Deploy fleet of containers across multiple regions.
+        
+        Args:
+            regions: List of Azure regions to distribute instances across. If None, defaults to ['westeurope'].
+                    Instances are randomly distributed across provided regions.
+        """
         response = {}
         input_files = None
+        
+        # Normalize regions to list
+        if regions is None:
+            regions = ['westeurope']
+        elif isinstance(regions, str):
+            regions = [regions]
+        
+        # Validate regions
+        is_valid, invalid_regions = validate_regions(regions)
+        if not is_valid:
+            if not quiet:
+                print(bad(f'Invalid regions: {", ".join(invalid_regions)}'))
+                print(info(f'Supported regions: {", ".join(AZURE_REGIONS)}'))
+            raise ValueError(f'Invalid regions: {", ".join(invalid_regions)}')
         
         # Create pool if not provided
         if pool is None:
@@ -598,6 +678,9 @@ class Acido(object):
 
             for cg_n, ins_num in enumerate(instance_num_groups):
                 last_instance = len(ins_num)
+                # Select random region for this container group
+                selected_region = select_random_region(regions)
+                
                 env_vars = {
                     'AZURE_RESOURCE_GROUP': self.rg,
                     'IMAGE_REGISTRY_SERVER': self.image_registry_server,
@@ -624,11 +707,14 @@ class Acido(object):
                             image_name=image_name,
                             input_files=input_files,
                             command=scan_cmd,
-                            network_profile=self.network_profile,
+                            vnet_name=self.vnet_name,
+                            subnet_name=self.subnet_name,
                             env_vars=env_vars,
                             quiet=quiet,
-                            location=region)
+                            location=selected_region)
         else:
+            # Select random region for this container group
+            selected_region = select_random_region(regions)
 
             if input_file:
                 input_filenames = split_file(input_file, instance_num)
@@ -656,10 +742,11 @@ class Acido(object):
                 image_name=image_name,
                 command=scan_cmd,
                 env_vars=env_vars,
-                network_profile=self.network_profile,
+                vnet_name=self.vnet_name,
+                subnet_name=self.subnet_name,
                 input_files=input_files,
                 quiet=quiet,
-                location=region)
+                location=selected_region)
         
         os.system('rm -f /tmp/acido-input*')
 
@@ -739,7 +826,7 @@ class Acido(object):
     
     def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
             write_to_file: str = None, output_format: str = 'txt', 
-            quiet: bool = False, cleanup: bool = True, region: str = 'westeurope'):
+            quiet: bool = False, cleanup: bool = True, regions=None):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -757,11 +844,28 @@ class Acido(object):
             output_format: Output format ('txt' or 'json')
             quiet: Quiet mode with progress bar
             cleanup: Whether to auto-cleanup after duration (default: True)
-            region: Azure region (default: westeurope)
+            regions: List of Azure regions to select from. If None, defaults to ['westeurope'].
         
         Returns:
             tuple: (response dict, outputs dict) or None if interactive mode
         """
+        # Normalize regions to list
+        if regions is None:
+            regions = ['westeurope']
+        elif isinstance(regions, str):
+            regions = [regions]
+        
+        # Validate regions
+        is_valid, invalid_regions = validate_regions(regions)
+        if not is_valid:
+            if not quiet:
+                print(bad(f'Invalid regions: {", ".join(invalid_regions)}'))
+                print(info(f'Supported regions: {", ".join(AZURE_REGIONS)}'))
+            raise ValueError(f'Invalid regions: {", ".join(invalid_regions)}')
+        
+        # Select random region
+        selected_region = select_random_region(regions)
+        
         # Validate duration (max 15 minutes for Lambda compatibility)
         if duration > 900:
             duration = 900
@@ -803,10 +907,11 @@ class Acido(object):
             image_name=image_name,
             command=task,
             env_vars=env_vars,
-            network_profile=self.network_profile,
+            vnet_name=self.vnet_name,
+            subnet_name=self.subnet_name,
             input_files=None,
             quiet=quiet,
-            location=region
+            location=selected_region
         )
         
         print_if_not_quiet(good(f"Successfully created container instance: [ {bold(name)} ]"))
@@ -2100,7 +2205,7 @@ def main():
             output_format=args.output_format,
             interactive=bool(args.interactive),
             quiet=args.quiet,
-            region=args.region
+            regions=args.region
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
@@ -2116,7 +2221,7 @@ def main():
             output_format=args.output_format,
             quiet=args.quiet,
             cleanup=not args.no_cleanup,
-            region=args.region
+            regions=args.region
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))

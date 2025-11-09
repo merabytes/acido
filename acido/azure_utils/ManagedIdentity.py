@@ -60,7 +60,12 @@ class ManagedIdentity:
                 return mi
             # fall through to SP only if MI cannot get any requested scope
 
-        # 2) Client Secret (env-only; do not prompt to keep non-interactive)
+        # 2) Azure CLI Credential (if available)
+        cli_cred = self.get_cli_credential()
+        if cli_cred and self._ensure_any_scope(cli_cred, scope_keys):
+            return cli_cred
+
+        # 3) Client Secret (env-only; do not prompt to keep non-interactive)
         sp = self._get_client_secret_credential()
         if self._ensure_any_scope(sp, ("instance",)):  # ARM-only for SP
             return sp

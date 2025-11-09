@@ -4,7 +4,8 @@ from azure.mgmt.containerinstance import ContainerInstanceManagementClient
 from azure.mgmt.containerinstance.models import (
     ContainerGroup, Container, ImageRegistryCredential, ResourceRequirements,
     ResourceRequests, OperatingSystemTypes, EnvironmentVariable,
-    ResourceIdentityType, ContainerGroupIdentity, UserAssignedIdentities
+    ResourceIdentityType, ContainerGroupIdentity, UserAssignedIdentities,
+    IpAddress, Port, ContainerGroupSubnetId
 )
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 from huepy import bad
@@ -24,7 +25,7 @@ class InstanceManager(ManagedIdentity):
     Credentials are validated against the ARM (instance) scope.
     """
 
-    def __init__(self, resource_group, login: bool = True, user_assigned: dict = {}, network_profile=None):
+    def __init__(self, resource_group, login: bool = True, user_assigned: dict = {}):
         if login:
             # ✅ Use instance (ARM) scope for authentication
             credential = self.get_credential(scope_keys=("instance",))
@@ -33,9 +34,9 @@ class InstanceManager(ManagedIdentity):
                 credential,
                 subscription
             )
+            self.subscription_id = subscription
         self.resource_group = resource_group
         self.image_registry_credentials = None
-        self.network_profile = network_profile
         self.env_vars = {}
         self.instances = []
         self.user_assigned = user_assigned
@@ -68,13 +69,23 @@ class InstanceManager(ManagedIdentity):
         )
         return instance
 
+    def _subnet_id(self, vnet_name, subnet_name):
+        return (
+            f"/subscriptions/{self.subscription_id}"
+            f"/resourceGroups/{self.resource_group}"
+            f"/providers/Microsoft.Network/virtualNetworks/{vnet_name}"
+            f"/subnets/{subnet_name}"
+        )
+
     def deploy(self, name, tags: dict = {}, location="westeurope",
-               ip_address=None, os_type=OperatingSystemTypes.linux,
-               restart_policy="Never", network_profile=None,
+               vnet_name: str = None, subnet_name: str = None,
+               os_type=OperatingSystemTypes.linux, restart_policy="Never",
                instance_number: int = 3, max_ram: int = 16,
                max_cpu: int = 4, image_name: str = None,
                env_vars: dict = {}, command: str = None,
-               input_files: list = None, quiet: bool = False):
+               input_files: list = None, quiet: bool = False,
+               expose_private_port: int = None):
+
         restart_policies = ["Always", "OnFailure", "Never"]
         if restart_policy not in restart_policies:
             raise ValueError(
@@ -105,27 +116,37 @@ class InstanceManager(ManagedIdentity):
                     cpu=float(max_cpu),
                     image=image_name,
                     env_vars=env_vars,
-                    command=["/opt/acido-venv/bin/acido", "-sh", command] if scan_cmd else None
+                    command=["/opt/acido-venv/bin/acido", "-sh", command] if scan_cmd else None,
+                    ports=[Port(protocol="TCP", port=expose_private_port)] if expose_private_port else None
                 )
             )
+
+        ip_cfg = None
+        if expose_private_port:
+            ip_cfg = IpAddress(type="Private", ports=[Port(protocol="TCP", port=expose_private_port)])
+
+        # Build subnet_ids if vnet_name and subnet_name are provided
+        subnet_ids = None
+        if vnet_name and subnet_name:
+            subnet_ids = [ContainerGroupSubnetId(id=self._subnet_id(vnet_name, subnet_name))]
 
         try:
             cg = ContainerGroup(
                 location=location,
                 containers=deploy_instances,
                 os_type=os_type,
-                ip_address=ip_address,
+                ip_address=ip_cfg,  # no public IP; egress via NAT GW
                 image_registry_credentials=ir_credentials,
                 restart_policy=restart_policy,
                 tags=tags,
-                network_profile=self.network_profile,
+                subnet_ids=subnet_ids,
                 identity=ContainerGroupIdentity(
                     type=ResourceIdentityType.user_assigned,
                     user_assigned_identities={
                         self.user_assigned['id']: UserAssignedIdentities(
                             client_id=self.user_assigned.get('clientId', '')
                         )
-                    }
+                    } if self.user_assigned else None
                 )
             )
             self._client.container_groups.begin_create_or_update(
