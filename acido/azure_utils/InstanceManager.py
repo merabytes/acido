@@ -5,7 +5,7 @@ from azure.mgmt.containerinstance.models import (
     ContainerGroup, Container, ImageRegistryCredential, ResourceRequirements,
     ResourceRequests, OperatingSystemTypes, EnvironmentVariable,
     ResourceIdentityType, ContainerGroupIdentity, UserAssignedIdentities,
-    IpAddress, Port, SubResource
+    IpAddress, Port, ContainerGroupSubnetId
 )
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 from huepy import bad
@@ -128,7 +128,7 @@ class InstanceManager(ManagedIdentity):
         # Build subnet_ids if vnet_name and subnet_name are provided
         subnet_ids = None
         if vnet_name and subnet_name:
-            subnet_ids = [SubResource(id=self._subnet_id(vnet_name, subnet_name))]
+            subnet_ids = [ContainerGroupSubnetId(id=self._subnet_id(vnet_name, subnet_name))]
 
         try:
             cg = ContainerGroup(
