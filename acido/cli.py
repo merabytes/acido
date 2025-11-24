@@ -1068,7 +1068,8 @@ class Acido(object):
     
     def delete_firewall(self, firewall_name):
         """
-        Delete an Azure Firewall.
+        Delete an Azure Firewall and its associated network infrastructure.
+        Removes: Firewall, VNet (including all subnets), and clears config.
         
         Args:
             firewall_name (str): Name of the firewall to delete
@@ -1081,11 +1082,52 @@ class Acido(object):
             return False
         
         try:
-            print(orange(f"Deleting Azure Firewall '{firewall_name}' (may save ~$900/month)"))
+            print(orange(f"Deleting Azure Firewall and network stack '{firewall_name}' (may save ~$900/month)"))
+            
+            # Get firewall details to find associated VNet before deletion
+            try:
+                firewall = self.firewall_manager.get_firewall(firewall_name)
+                if firewall and firewall.ip_configurations:
+                    # Extract VNet name from subnet ID
+                    # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
+                    subnet_id = firewall.ip_configurations[0].subnet.id
+                    vnet_name = subnet_id.split('/virtualNetworks/')[1].split('/')[0]
+                    print(info(f"Found associated VNet: {vnet_name}"))
+                else:
+                    vnet_name = self.ingress_vnet_name
+                    if vnet_name:
+                        print(info(f"Using VNet from config: {vnet_name}"))
+            except Exception as e:
+                print(orange(f"Could not retrieve VNet from firewall: {e}"))
+                vnet_name = self.ingress_vnet_name
+                if vnet_name:
+                    print(info(f"Using VNet from config: {vnet_name}"))
+            
+            # Step 1: Delete the firewall
+            print(info("Step 1/2: Deleting Azure Firewall..."))
             result = self.firewall_manager.delete_firewall(firewall_name)
             
+            if not result:
+                print(bad("Failed to delete firewall"))
+                return False
+            
+            # Step 2: Delete VNet (this will delete all subnets within it)
+            if vnet_name:
+                print(info(f"Step 2/2: Deleting VNet '{vnet_name}' and all subnets..."))
+                try:
+                    self.network_manager._client.virtual_networks.begin_delete(
+                        self.network_manager.resource_group,
+                        vnet_name
+                    ).result()
+                    print(good(f"VNet '{vnet_name}' and all subnets deleted"))
+                except Exception as e:
+                    print(orange(f"Warning: Could not delete VNet '{vnet_name}': {e}"))
+                    print(info("VNet may have been manually deleted or doesn't exist"))
+            else:
+                print(info("Step 2/2: No VNet to delete (not found in firewall or config)"))
+            
             # Clear firewall configuration from config if it matches
-            if result and self.firewall_name == firewall_name:
+            if self.firewall_name == firewall_name:
                 self.firewall_name = None
                 self.firewall_public_ip = None
                 self.ingress_vnet_name = None
@@ -1093,7 +1135,8 @@ class Acido(object):
                 self._save_config()
                 print(good("Firewall configuration cleared from config"))
             
-            return result
+            print(good(f"Firewall '{firewall_name}' and network stack deleted successfully"))
+            return True
         except Exception as e:
             print(bad(f"Failed to delete firewall: {str(e)}"))
             return False

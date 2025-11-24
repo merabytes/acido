@@ -170,8 +170,13 @@ acido firewall delete-rule my-firewall \
   --rule-name voip-sip-udp \
   --collection voip-rules
 
-# Remove firewall (saves ~$900/month)
+# Remove firewall and entire network stack (saves ~$900/month)
 acido firewall rm my-firewall
+# This deletes:
+# - Azure Firewall
+# - Virtual Network (VNet)
+# - All subnets (AzureFirewallSubnet, container-ingress-subnet)
+# - Clears firewall configuration from config
 ```
 
 ## CLI Commands
@@ -188,8 +193,9 @@ acido firewall create <name> \
 # List firewalls
 acido firewall ls
 
-# Remove firewall
+# Remove firewall and network stack
 acido firewall rm <name>
+# Deletes: Firewall, VNet, all subnets, and clears config
 ```
 
 ### DNAT Rule Management
