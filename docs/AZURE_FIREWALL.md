@@ -278,6 +278,42 @@ acido firewall add-rule my-firewall \
   --protocol TCP
 ```
 
+### Example 3: Using Port Ranges
+
+Port ranges are useful when you need to expose multiple consecutive ports (e.g., RTP media streams, game server ports).
+
+```bash
+# Deploy game server with port range for player connections
+acido run game-server \
+  -im myapp/gameserver:latest \
+  -t "./start.sh" \
+  --expose-port 7777:tcp \
+  --expose-port 27015-27020:udp \
+  --cpu 4 --ram 8
+
+# This automatically creates:
+# - 1 DNAT rule for TCP port 7777
+# - 6 DNAT rules for UDP ports 27015, 27016, 27017, 27018, 27019, 27020
+
+# Deploy VoIP server with RTP port range
+acido run voip-server \
+  -im asterisk:latest \
+  -t "./start.sh" \
+  --expose-port 5060:udp \
+  --expose-port 5060:tcp \
+  --expose-port 10000-10099:udp \
+  --cpu 4 --ram 8
+
+# This creates 102 DNAT rules total:
+# - 2 for SIP signaling (5060 UDP/TCP)
+# - 100 for RTP media streams (10000-10099 UDP)
+```
+
+**Port Range Limits:**
+- Maximum 100 ports per range specification
+- Ranges are expanded: `5060-5062:udp` creates rules for 5060, 5061, and 5062
+- Format: `START_PORT-END_PORT:PROTOCOL` (e.g., `10000-10099:udp`)
+
 ## Comparison: Firewall vs Bidirectional
 
 | Feature | Firewall (Solution 4) | Bidirectional (Solution 1) |

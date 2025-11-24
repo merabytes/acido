@@ -167,7 +167,7 @@ run_parser.add_argument('--region', dest='region', action='append', help='Azure 
 run_parser.add_argument('--bidirectional', dest='bidirectional', action='store_true', 
                          help='Enable bidirectional connectivity (assigns public IP for inbound connections). Requires --expose-port.')
 run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
-                         help='Port to expose in format PORT:PROTOCOL (e.g., 5060:udp, 8080:tcp). Can be specified multiple times. Requires --bidirectional.')
+                         help='Port(s) to expose in format PORT:PROTOCOL or PORT_START-PORT_END:PROTOCOL (e.g., 5060:udp, 8080:tcp, 5060-5070:udp for range). Can be specified multiple times. Requires --bidirectional or firewall configured.')
 run_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores (default: 4)')
 run_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB (default: 16)')
 run_parser.add_argument('-e', '--env', dest='env_vars', action='append',
@@ -2802,14 +2802,16 @@ def main():
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, getattr(args, 'image_tag', 'latest'))
         
-        # Parse exposed ports if provided
+        # Parse exposed ports if provided (supports single ports and ranges)
         exposed_ports = None
         if hasattr(args, 'expose_ports') and args.expose_ports:
             from acido.utils.port_utils import parse_port_spec
             exposed_ports = []
             for spec in args.expose_ports:
                 try:
-                    exposed_ports.append(parse_port_spec(spec))
+                    # parse_port_spec now returns a list (single port or range)
+                    parsed_ports = parse_port_spec(spec)
+                    exposed_ports.extend(parsed_ports)
                 except ValueError as e:
                     print(bad(str(e)))
                     sys.exit(1)

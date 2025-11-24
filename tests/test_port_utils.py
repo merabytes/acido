@@ -21,20 +21,55 @@ class TestPortUtils(unittest.TestCase):
     def test_parse_port_spec_valid_udp(self):
         """Test parsing valid UDP port specification."""
         result = parse_port_spec("5060:udp")
-        self.assertEqual(result["port"], 5060)
-        self.assertEqual(result["protocol"], "UDP")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["port"], 5060)
+        self.assertEqual(result[0]["protocol"], "UDP")
     
     def test_parse_port_spec_valid_tcp(self):
         """Test parsing valid TCP port specification."""
         result = parse_port_spec("8080:tcp")
-        self.assertEqual(result["port"], 8080)
-        self.assertEqual(result["protocol"], "TCP")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["port"], 8080)
+        self.assertEqual(result[0]["protocol"], "TCP")
     
     def test_parse_port_spec_case_insensitive(self):
         """Test that protocol parsing is case insensitive."""
         result = parse_port_spec("443:TcP")
-        self.assertEqual(result["port"], 443)
-        self.assertEqual(result["protocol"], "TCP")
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["port"], 443)
+        self.assertEqual(result[0]["protocol"], "TCP")
+    
+    def test_parse_port_spec_range_valid(self):
+        """Test parsing valid port range specification."""
+        result = parse_port_spec("5060-5062:udp")
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0]["port"], 5060)
+        self.assertEqual(result[0]["protocol"], "UDP")
+        self.assertEqual(result[1]["port"], 5061)
+        self.assertEqual(result[1]["protocol"], "UDP")
+        self.assertEqual(result[2]["port"], 5062)
+        self.assertEqual(result[2]["protocol"], "UDP")
+    
+    def test_parse_port_spec_range_tcp(self):
+        """Test parsing TCP port range."""
+        result = parse_port_spec("8080-8082:tcp")
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0]["port"], 8080)
+        self.assertEqual(result[2]["port"], 8082)
+        for port_info in result:
+            self.assertEqual(port_info["protocol"], "TCP")
+    
+    def test_parse_port_spec_range_invalid_order(self):
+        """Test parsing port range with invalid order (start > end)."""
+        with self.assertRaises(ValueError) as context:
+            parse_port_spec("5070-5060:udp")
+        self.assertIn("must be less than", str(context.exception))
+    
+    def test_parse_port_spec_range_too_large(self):
+        """Test parsing port range that's too large (>100 ports)."""
+        with self.assertRaises(ValueError) as context:
+            parse_port_spec("1000-1200:udp")  # 201 ports
+        self.assertIn("too large", str(context.exception))
     
     def test_parse_port_spec_invalid_format(self):
         """Test parsing invalid port specification format."""
@@ -138,26 +173,49 @@ class TestPortUtilsIntegration(unittest.TestCase):
         """Test parsing a port spec and formatting it back."""
         spec = "5060:udp"
         parsed = parse_port_spec(spec)
-        formatted = format_port_list([parsed])
+        formatted = format_port_list(parsed)
         self.assertEqual(formatted, "5060/UDP")
     
     def test_multiple_ports_workflow(self):
         """Test typical workflow with multiple ports."""
         specs = ["5060:udp", "5060:tcp", "8080:tcp"]
-        parsed_ports = [parse_port_spec(spec) for spec in specs]
+        all_ports = []
+        for spec in specs:
+            all_ports.extend(parse_port_spec(spec))
         
         # Verify all parsed correctly
-        self.assertEqual(len(parsed_ports), 3)
-        self.assertEqual(parsed_ports[0]["port"], 5060)
-        self.assertEqual(parsed_ports[0]["protocol"], "UDP")
-        self.assertEqual(parsed_ports[1]["port"], 5060)
-        self.assertEqual(parsed_ports[1]["protocol"], "TCP")
-        self.assertEqual(parsed_ports[2]["port"], 8080)
-        self.assertEqual(parsed_ports[2]["protocol"], "TCP")
+        self.assertEqual(len(all_ports), 3)
+        self.assertEqual(all_ports[0]["port"], 5060)
+        self.assertEqual(all_ports[0]["protocol"], "UDP")
+        self.assertEqual(all_ports[1]["port"], 5060)
+        self.assertEqual(all_ports[1]["protocol"], "TCP")
+        self.assertEqual(all_ports[2]["port"], 8080)
+        self.assertEqual(all_ports[2]["protocol"], "TCP")
         
         # Format for display
-        formatted = format_port_list(parsed_ports)
+        formatted = format_port_list(all_ports)
         self.assertEqual(formatted, "5060/UDP, 5060/TCP, 8080/TCP")
+    
+    def test_port_range_workflow(self):
+        """Test workflow with port ranges."""
+        specs = ["5060-5062:udp", "8080:tcp"]
+        all_ports = []
+        for spec in specs:
+            all_ports.extend(parse_port_spec(spec))
+        
+        # Verify range was expanded
+        self.assertEqual(len(all_ports), 4)  # 3 from range + 1 single
+        self.assertEqual(all_ports[0]["port"], 5060)
+        self.assertEqual(all_ports[1]["port"], 5061)
+        self.assertEqual(all_ports[2]["port"], 5062)
+        self.assertEqual(all_ports[3]["port"], 8080)
+        
+        # Format for display
+        formatted = format_port_list(all_ports)
+        self.assertIn("5060/UDP", formatted)
+        self.assertIn("5061/UDP", formatted)
+        self.assertIn("5062/UDP", formatted)
+        self.assertIn("8080/TCP", formatted)
 
 
 if __name__ == '__main__':
