@@ -4,7 +4,7 @@ This directory contains comprehensive documentation for the port forwarding feat
 
 ## Documents Overview
 
-### 1. [PORT_FORWARDING_SUMMARY.md](../PORT_FORWARDING_SUMMARY.md) ⭐ Start Here
+### 1. [PORT_FORWARDING_SUMMARY.md](./PORT_FORWARDING_SUMMARY.md) ⭐ Start Here
 **Executive Summary** - High-level overview for decision makers
 
 - Problem statement and impact
@@ -16,7 +16,7 @@ This directory contains comprehensive documentation for the port forwarding feat
 
 **Best for**: Product managers, architects, stakeholders
 
-### 2. [PORT_FORWARDING_PROPOSAL.md](../PORT_FORWARDING_PROPOSAL.md)
+### 2. [PORT_FORWARDING_PROPOSAL.md](./PORT_FORWARDING_PROPOSAL.md)
 **Technical Proposal** - Complete architecture analysis
 
 - Detailed current architecture review
@@ -69,10 +69,10 @@ Plus:
 ### I want to...
 
 **Understand the feature**
-→ Start with [PORT_FORWARDING_SUMMARY.md](../PORT_FORWARDING_SUMMARY.md)
+→ Start with [PORT_FORWARDING_SUMMARY.md](./PORT_FORWARDING_SUMMARY.md)
 
 **Evaluate technical options**
-→ Read [PORT_FORWARDING_PROPOSAL.md](../PORT_FORWARDING_PROPOSAL.md)
+→ Read [PORT_FORWARDING_PROPOSAL.md](./PORT_FORWARDING_PROPOSAL.md)
 
 **Implement the feature**
 → Follow [port_forwarding_implementation.md](./port_forwarding_implementation.md)
