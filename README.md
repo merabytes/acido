@@ -300,6 +300,48 @@ acido fleet scan -n 10 -im nmap \
 - Container IP is printed after deployment for easy access
 - Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)
 
+### Environment Variables
+
+Both `acido run` and `acido fleet` support setting custom environment variables using the `-e` or `--env` flag, similar to Docker.
+
+**Two formats supported:**
+1. `KEY=value` - Set KEY to the specified value
+2. `KEY` - Use value from your current environment
+
+**Examples:**
+
+```bash
+# Set environment variables with explicit values
+acido run myapp \
+  -im myapp:latest \
+  -e DEBUG=true \
+  -e LOG_LEVEL=info \
+  -e API_KEY=secret123
+
+# Use environment variables from your shell
+export DATABASE_URL="postgresql://localhost/mydb"
+export API_TOKEN="xyz789"
+
+acido run myapp \
+  -im myapp:latest \
+  -e DATABASE_URL \
+  -e API_TOKEN \
+  -e APP_ENV=production
+
+# Works with fleet too
+acido fleet workers -n 5 \
+  -im worker:latest \
+  -t "python worker.py" \
+  -e WORKER_POOL=large \
+  -e REDIS_URL \
+  -e DEBUG=false
+```
+
+**Notes:**
+- Multiple `-e` flags can be specified
+- Custom env vars are merged with acido's built-in environment variables
+- If a KEY is not found in your environment, a warning is shown and it's skipped
+
 
 ## Docker Usage
 

@@ -74,6 +74,44 @@ def select_random_region(regions):
         return 'westeurope'
     return random.choice(regions)
 
+def parse_env_vars(env_list):
+    """
+    Parse environment variable specifications.
+    
+    Supports two formats:
+    1. KEY=value - Sets KEY to the specified value
+    2. KEY - Gets value from current environment
+    
+    Args:
+        env_list (list): List of environment variable specifications
+        
+    Returns:
+        dict: Dictionary of environment variables
+        
+    Example:
+        >>> parse_env_vars(['DEBUG=true', 'HOME'])
+        {'DEBUG': 'true', 'HOME': '/home/user'}
+    """
+    env_dict = {}
+    if not env_list:
+        return env_dict
+    
+    for env_spec in env_list:
+        if '=' in env_spec:
+            # KEY=value format
+            key, value = env_spec.split('=', 1)
+            env_dict[key] = value
+        else:
+            # KEY format - get from current environment
+            key = env_spec
+            value = os.environ.get(key)
+            if value is not None:
+                env_dict[key] = value
+            else:
+                print(orange(f"Warning: Environment variable '{key}' not found in current environment, skipping"))
+    
+    return env_dict
+
 parser = argparse.ArgumentParser()
 
 # Add subparsers for Docker-like subcommands
@@ -108,6 +146,8 @@ fleet_parser.add_argument('--rm-when-done', dest='rm_when_done', action='store_t
 fleet_parser.add_argument('--region', dest='region', action='append', help='Azure region (e.g., westeurope, eastus). Can be specified multiple times for multi-region deployment.')
 fleet_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores per container (default varies by command)')
 fleet_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB per container (default varies by command)')
+fleet_parser.add_argument('-e', '--env', dest='env_vars', action='append', 
+                           help='Set environment variables (format: KEY=value or KEY to use value from current environment). Can be specified multiple times.')
 
 # Run subcommand (ephemeral single instance with auto-cleanup)
 run_parser = subparsers.add_parser('run', help='Run a single ephemeral container instance with auto-cleanup after specified duration')
@@ -126,6 +166,8 @@ run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
                          help='Port to expose in format PORT:PROTOCOL (e.g., 5060:udp, 8080:tcp). Can be specified multiple times. Requires --bidirectional.')
 run_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores (default: 4)')
 run_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB (default: 16)')
+run_parser.add_argument('-e', '--env', dest='env_vars', action='append',
+                         help='Set environment variables (format: KEY=value or KEY to use value from current environment). Can be specified multiple times.')
 
 # List subcommand (Docker-like: acido ls)
 ls_parser = subparsers.add_parser('ls', help='List all container instances')
@@ -707,7 +749,7 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, regions=None, max_cpu=None, max_ram=None):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, regions=None, max_cpu=None, max_ram=None, custom_env_vars=None):
         """
         Deploy fleet of containers across multiple regions.
         
@@ -716,6 +758,7 @@ class Acido(object):
                     Instances are randomly distributed across provided regions.
             max_cpu: Maximum CPU cores per container (default depends on instance number)
             max_ram: Maximum RAM in GB per container (default depends on instance number)
+            custom_env_vars: Dictionary of custom environment variables to set in containers
         """
         response = {}
         input_files = None
@@ -771,6 +814,11 @@ class Acido(object):
                         "EndpointSuffix=core.windows.net"
                     )
                 }
+                
+                # Merge custom environment variables if provided
+                if custom_env_vars:
+                    env_vars.update(custom_env_vars)
+                
                 group_name = f'{fleet_name}-{cg_n+1:02d}'
 
                 if group_name not in response.keys():
@@ -810,6 +858,10 @@ class Acido(object):
                         "EndpointSuffix=core.windows.net"
                     )
             }
+            
+            # Merge custom environment variables if provided
+            if custom_env_vars:
+                env_vars.update(custom_env_vars)
 
             response[fleet_name], input_files = self.instance_manager.deploy(
                 name=fleet_name, 
@@ -905,7 +957,7 @@ class Acido(object):
             write_to_file: str = None, output_format: str = 'txt', 
             quiet: bool = False, cleanup: bool = True, regions=None,
             bidirectional: bool = False, exposed_ports: list = None,
-            max_cpu: int = 4, max_ram: int = 16):
+            max_cpu: int = 4, max_ram: int = 16, custom_env_vars: dict = None):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -973,6 +1025,10 @@ class Acido(object):
                 "EndpointSuffix=core.windows.net"
             )
         }
+        
+        # Merge custom environment variables if provided
+        if custom_env_vars:
+            env_vars.update(custom_env_vars)
         
         response = {}
         outputs = {}
@@ -2297,6 +2353,10 @@ def main():
         args.num_instances = int(args.num_instances) if args.num_instances else 1
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, args.image_tag)
+        
+        # Parse custom environment variables if provided
+        custom_env_vars = parse_env_vars(getattr(args, 'env_vars', None))
+        
         acido.fleet(
             fleet_name=args.fleet, 
             instance_num=int(args.num_instances) if args.num_instances else 1, 
@@ -2310,7 +2370,8 @@ def main():
             quiet=args.quiet,
             regions=args.region,
             max_cpu=getattr(args, 'cpu', None),
-            max_ram=getattr(args, 'ram', None)
+            max_ram=getattr(args, 'ram', None),
+            custom_env_vars=custom_env_vars
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
@@ -2335,6 +2396,9 @@ def main():
             print(bad("--bidirectional requires --expose-port to be specified"))
             sys.exit(1)
         
+        # Parse custom environment variables if provided
+        custom_env_vars = parse_env_vars(getattr(args, 'env_vars', None))
+        
         acido.run(
             name=args.name,
             image_name=full_image_url,
@@ -2348,7 +2412,8 @@ def main():
             bidirectional=getattr(args, 'bidirectional', False),
             exposed_ports=exposed_ports,
             max_cpu=getattr(args, 'cpu', 4),
-            max_ram=getattr(args, 'ram', 16)
+            max_ram=getattr(args, 'ram', 16),
+            custom_env_vars=custom_env_vars
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
