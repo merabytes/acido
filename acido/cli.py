@@ -589,7 +589,14 @@ class Acido(object):
             self._save_config()
             print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
         else:
-            # Standalone IP - no NAT stack
+            # Standalone IP - no NAT stack, clear any vnet/subnet config
+            self.public_ip_name = public_ip_name
+            self.public_ip_id = pip_id
+            self.vnet_name = None
+            self.subnet_name = None
+            self.subnet_id = None
+            
+            self._save_config()
             print(good(f"Standalone public IP created: {public_ip_name} (no NAT Gateway stack)"))
 
 
@@ -636,11 +643,19 @@ class Acido(object):
         self.public_ip_name = name
         self.public_ip_id = chosen['id']
         
-        # Assume naming convention for vnet/subnet
-        self.vnet_name = f"{name}-vnet"
-        self.subnet_name = f"{name}-subnet"
-        # subnet_id will be constructed when needed
-        self.subnet_id = None
+        # Only set vnet/subnet for IPs with NAT stack
+        # Standalone IPs should not have network profile to allow public IP assignment
+        if chosen.get('has_nat_stack'):
+            # Assume naming convention for vnet/subnet
+            self.vnet_name = f"{name}-vnet"
+            self.subnet_name = f"{name}-subnet"
+            # subnet_id will be constructed when needed
+            self.subnet_id = None
+        else:
+            # Standalone IP - clear any existing vnet/subnet configuration
+            self.vnet_name = None
+            self.subnet_name = None
+            self.subnet_id = None
         
         self._save_config()
         
