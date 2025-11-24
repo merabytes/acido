@@ -261,11 +261,7 @@ def lambda_handler(event, context):
                 f'Missing required fields for run operation: {", ".join(missing_fields)}'
             )
         
-        # For run operation, either 'task' or 'entrypoint' must be provided
-        if not event.get('task') and not event.get('entrypoint'):
-            return build_error_response(
-                'Run operation requires either "task" or "entrypoint" (or both) to be specified'
-            )
+        # For run operation, task and entrypoint are both optional (allows using default image entrypoint/cmd)
     elif operation == 'rm':
         # rm operation requires 'name' field
         required_fields = ['name']

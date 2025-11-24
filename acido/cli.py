@@ -986,14 +986,14 @@ class Acido(object):
         Args:
             name: Container instance name
             image_name: Full image URL
-            task: Command to execute (optional, but either task or entrypoint must be provided)
+            task: Command to execute (optional - if not provided, uses image default CMD)
             duration: Duration in seconds before auto-cleanup (default: 900s/15min, max: 900s)
             write_to_file: Save output to file (optional)
             output_format: Output format ('txt' or 'json')
             quiet: Quiet mode with progress bar
             cleanup: Whether to auto-cleanup after duration (default: True)
             regions: List of Azure regions to select from. If None, defaults to ['westeurope'].
-            entrypoint: Override container entrypoint (optional, but either task or entrypoint must be provided)
+            entrypoint: Override container entrypoint (optional - if not provided, uses image default ENTRYPOINT)
         
         Returns:
             tuple: (response dict, outputs dict) or None if interactive mode
@@ -2382,6 +2382,13 @@ def main():
         acido.load_input(args.download_input, write_to_file=True)
     if args.fleet:
         args.num_instances = int(args.num_instances) if args.num_instances else 1
+        
+        # Validate: fleet command requires --task
+        if not args.task:
+            print(bad("Error: 'acido fleet' requires --task to be specified"))
+            print(info("  Use --task to specify the command to execute across the fleet"))
+            sys.exit(1)
+        
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, args.image_tag)
         
@@ -2427,14 +2434,9 @@ def main():
             print(bad("--bidirectional requires --expose-port to be specified"))
             sys.exit(1)
         
-        # Validate: For run command, either --entrypoint or --task must be provided
+        # Get entrypoint and task (both optional - allows using default image entrypoint/cmd)
         entrypoint = getattr(args, 'entrypoint', None)
         task = getattr(args, 'task', None)
-        if not entrypoint and not task:
-            print(bad("Error: 'acido run' requires either --entrypoint or --task (or both) to be specified"))
-            print(info("  Use --entrypoint to override the container's ENTRYPOINT"))
-            print(info("  Use --task to specify the command/CMD to execute"))
-            sys.exit(1)
         
         # Parse custom environment variables if provided
         custom_env_vars = parse_env_vars(getattr(args, 'env_vars', None))
