@@ -1988,7 +1988,7 @@ ENV PATH="/opt/acido-venv/bin:$PATH"
             
             # Generate acido installation instructions based on distro
             if distro_info['type'] == 'alpine':
-                acido_install = '''
+                acido_install = f'''
 # Install Python and acido in virtual environment
 RUN apk update && apk add --no-cache python3 py3-pip gcc python3-dev musl-dev linux-headers && \\
     python3 -m venv /opt/acido-venv && \\
@@ -2013,7 +2013,7 @@ RUN {pkg_manager} update -y && {pkg_manager} install -y python3 python3-pip gcc 
 ENV PATH="/opt/acido-venv/bin:$PATH"
 '''
             else:  # Debian/Ubuntu-based
-                acido_install = '''
+                acido_install = f'''
 # Install Python and acido in virtual environment
 RUN apt-get update && apt-get install -y python3 python3-pip build-essential python3-dev && rm -rf /var/lib/apt/lists/* && \\
     python3 -m venv /opt/acido-venv && \\
