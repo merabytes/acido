@@ -298,7 +298,8 @@ class FirewallManager(ManagedIdentity):
                                 self.resource_group, ip_name
                             )
                             public_ip_address = pip.ip_address
-                        except:
+                        except (ResourceNotFoundError, Exception) as e:
+                            # IP might be deleted or inaccessible
                             pass
                 
                 # Count DNAT rules

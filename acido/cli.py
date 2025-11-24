@@ -220,7 +220,7 @@ firewall_add_rule_parser.add_argument('--rule-name', dest='rule_name', required=
 firewall_add_rule_parser.add_argument('--collection', dest='collection_name', default='default-dnat', 
                                       help='NAT rule collection name (default: default-dnat)')
 firewall_add_rule_parser.add_argument('--source', dest='source_addresses', action='append', default=['*'],
-                                      help='Source IP addresses (default: *, can specify multiple times)')
+                                      help='Source IP addresses (default: ["*"] for any source, can specify multiple times)')
 firewall_add_rule_parser.add_argument('--dest-ip', dest='destination_address', required=True,
                                       help='Firewall public IP address (destination)')
 firewall_add_rule_parser.add_argument('--dest-port', dest='destination_port', required=True,
