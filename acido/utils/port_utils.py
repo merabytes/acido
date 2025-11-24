@@ -18,7 +18,12 @@ def parse_port_spec(port_spec):
         {"port": 5060, "protocol": "UDP"}
     """
     try:
-        port, protocol = port_spec.split(':')
+        # Use maxsplit=1 to handle cases where protocol might contain colons
+        parts = port_spec.split(':', maxsplit=1)
+        if len(parts) != 2:
+            raise ValueError("Missing port or protocol")
+        
+        port, protocol = parts
         port_num = int(port)
         protocol_upper = protocol.upper()
         

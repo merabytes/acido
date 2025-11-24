@@ -47,6 +47,11 @@ class TestPortUtils(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_port_spec("8080:")
     
+    def test_parse_port_spec_extra_colons(self):
+        """Test parsing port spec with extra colons (should handle gracefully)."""
+        with self.assertRaises(ValueError):
+            parse_port_spec("8080:tcp:extra")
+    
     def test_parse_port_spec_invalid_port_number(self):
         """Test parsing invalid port number."""
         with self.assertRaises(ValueError):
