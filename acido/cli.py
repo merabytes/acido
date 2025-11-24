@@ -850,7 +850,9 @@ class Acido(object):
                             subnet_name=self.subnet_name,
                             env_vars=env_vars,
                             quiet=quiet,
-                            location=selected_region)
+                            location=selected_region,
+                            max_cpu=max_cpu if max_cpu else 8,
+                            max_ram=max_ram if max_ram else 8)
         else:
             # Select random region for this container group
             selected_region = select_random_region(regions)
@@ -890,8 +892,8 @@ class Acido(object):
                 input_files=input_files,
                 quiet=quiet,
                 location=selected_region,
-                max_cpu=max_cpu if max_cpu else 16,
-                max_ram=max_ram if max_ram else 16)
+                max_cpu=max_cpu if max_cpu else 8,
+                max_ram=max_ram if max_ram else 8)
         
         os.system('rm -f /tmp/acido-input*')
 

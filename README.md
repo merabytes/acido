@@ -299,6 +299,8 @@ acido fleet scan -n 10 -im nmap \
 - Multiple ports can be exposed by repeating `--expose-port`
 - Container IP is printed after deployment for easy access
 - Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)
+  - Default for `acido run`: 4 CPU cores, 16 GB RAM (when not specified)
+  - Default for `acido fleet`: 8 CPU cores, 8 GB RAM (when not specified) - reduced to fit within Azure quota limits
 - **For `acido run`**: `--entrypoint` and `--task` are both optional - if not provided, uses the default entrypoint/cmd from the Docker image
 - **For `acido fleet`**: `--task` is **required** to specify the command to execute across the fleet
 
