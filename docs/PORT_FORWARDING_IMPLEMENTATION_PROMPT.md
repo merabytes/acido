@@ -6,11 +6,16 @@ Implement port forwarding feature for Azure Container Instances to enable inboun
 
 ## Background
 
-**Current State**: Acido containers can only make outbound connections via NAT Gateway.
+**Current State**: Acido containers use NAT Gateway for egress-only connectivity (default behavior).
 
-**Goal**: Enable containers to accept inbound connections by assigning dedicated Azure public IPs.
+**Goal**: Enable **single containers** (`acido run`) to accept inbound connections by assigning dedicated Azure public IPs using `--bidirectional` flag.
 
 **Key Finding**: Azure NAT Gateway does NOT support inbound connections or DNAT. Must use public IPs directly on container groups.
+
+**Important**: 
+- **Default behavior unchanged**: Containers continue using NAT Gateway for egress
+- **Fleet unchanged**: `acido fleet` always uses NAT Gateway (single shared IP for massive scanning)
+- **Bidirectional only for run**: `acido run --bidirectional` assigns public IP for inbound connectivity
 
 ## Complete Documentation Available
 
@@ -27,20 +32,21 @@ All proposal documents are in `docs/`:
 ### 1. New CLI Commands
 
 ```bash
-# Create public IP for port forwarding
-acido ip create-forwarding <name> --ports PORT:PROTOCOL
+# Create public IP for bidirectional containers
+acido ip create <name> --ports PORT:PROTOCOL
 
-# List port-forwarding enabled IPs
-acido ip ls-forwarding
+# List public IPs
+acido ip ls
 
-# Clean IP configuration from local config
+# Clean IP configuration from local config  
 acido ip clean
 
-# Deploy with port forwarding (network config auto-derived from --public-ip)
-acido run <name> --public-ip <ip> --expose-port PORT:PROTOCOL
+# Deploy with bidirectional connectivity (assigns public IP directly)
+acido run <name> --bidirectional --expose-port PORT:PROTOCOL
 
-# Fleet with network configuration
-acido fleet <name> --public-ip <ip>
+# Default behavior (egress-only via NAT Gateway) - NO CHANGES
+acido run <name>  # Uses NAT Gateway
+acido fleet <name>  # Always uses NAT Gateway (no --bidirectional option)
 
 # NEW: Configurable CPU and RAM resources
 acido run <name> --cpu <cores> --ram <gb>
@@ -49,106 +55,43 @@ acido fleet <name> --cpu <cores> --ram <gb>
 
 ### 2. Core Features
 
+**Bidirectional Flag** (NEW REQUIREMENT):
+- Add `--bidirectional` flag to `run` command ONLY
+- When `--bidirectional` is specified, assign public IP directly to container
+- Requires `--expose-port` to specify which ports to expose
+- NOT available for `fleet` command (fleet always uses NAT Gateway)
+- Default behavior: egress-only via NAT Gateway (unchanged)
+
 **Configurable CPU and RAM** (NEW REQUIREMENT):
 - Add `--cpu` argument to `run` and `fleet` commands (default: varies by command)
 - Add `--ram` argument to `run` and `fleet` commands (default: varies by command)
 - Pass these values to `InstanceManager.deploy()` as `max_cpu` and `max_ram` parameters
 - Validate CPU and RAM values are within Azure Container Instances limits
 
-**Automatic Subnet Derivation**:
-- When `--public-ip voip-ip` is specified, automatically derive:
-  - VNet: `voip-ip-vnet`
-  - Subnet: `voip-ip-subnet`
-- No need to run `acido ip select` or read from config
-- Works for both `acido.run()` and `acido.fleet()`
-
 **Config Warning System**:
-- Warn if IP is selected in config but `--public-ip` not specified
-- Display: "Warning: IP 'old-ip' is selected in config but --public-ip not specified"
+- Warn if IP is selected in config but not being used
 - Suggest: "To clear config: run 'acido ip clean'"
 
 **IP Clean Command**:
 - Clears from config: public_ip_name, public_ip_id, vnet_name, subnet_name, subnet_id
 
-### 3. Code Changes Required (~500 LOC)
+### 3. Code Changes Required (~300 LOC)
 
 #### NetworkManager.py (`acido/azure_utils/NetworkManager.py`)
 
-Add new methods:
-
-```python
-def create_forwarding_ip(self, name, ports=None):
-    """
-    Create a public IP for port forwarding with optional port metadata.
-    
-    Args:
-        name (str): Name of the public IP resource
-        ports (list, optional): List of port dicts [{"port": 5060, "protocol": "UDP"}]
-    
-    Returns:
-        tuple: (public_ip_id, ip_address_string)
-    """
-    tags = {'purpose': 'port-forwarding'}
-    if ports:
-        tags['ports'] = ','.join([f"{p['port']}/{p['protocol']}" for p in ports])
-    
-    params = {
-        'location': self.location,
-        'public_ip_allocation_method': 'Static',
-        'public_ip_address_version': 'IPv4',
-        'sku': PublicIPAddressSku(name='Standard', tier='Regional'),
-        'tags': tags
-    }
-    
-    pip = self._client.public_ip_addresses.begin_create_or_update(
-        self.resource_group, name, params
-    ).result()
-    
-    return pip.id, pip.ip_address
-
-def get_public_ip(self, name):
-    """Get public IP resource by name."""
-    return self._client.public_ip_addresses.get(self.resource_group, name)
-
-def list_forwarding_ips(self):
-    """List all public IPs tagged for port forwarding."""
-    all_ips = self._client.public_ip_addresses.list(self.resource_group)
-    forwarding_ips = []
-    
-    for ip in all_ips:
-        if ip.tags and ip.tags.get('purpose') == 'port-forwarding':
-            forwarding_ips.append({
-                'id': ip.id,
-                'name': ip.name,
-                'ip_address': ip.ip_address,
-                'location': ip.location,
-                'ports': ip.tags.get('ports', 'N/A')
-            })
-    
-    return forwarding_ips
-
-def delete_forwarding_ip(self, name):
-    """Delete a port forwarding public IP."""
-    try:
-        self._client.public_ip_addresses.begin_delete(
-            self.resource_group, name
-        ).result()
-        return True
-    except Exception:
-        return False
-```
+No changes needed - existing IP creation methods work fine.
 
 #### InstanceManager.py (`acido/azure_utils/InstanceManager.py`)
 
 Modify `deploy()` method to accept new parameters:
 
 ```python
-def deploy(self, name, ..., public_ip_name=None, exposed_ports=None):
+def deploy(self, name, ..., bidirectional=False, exposed_ports=None):
     """
-    Deploy container group with optional public IP and port forwarding.
+    Deploy container group with optional bidirectional connectivity.
     
     New Args:
-        public_ip_name (str, optional): Name of public IP resource
+        bidirectional (bool, optional): If True, assign public IP for inbound connectivity
         exposed_ports (list, optional): List of port dicts [{"port": 5060, "protocol": "UDP"}]
     """
     # ... existing code ...
@@ -156,19 +99,24 @@ def deploy(self, name, ..., public_ip_name=None, exposed_ports=None):
     # Configure IP address
     ip_cfg = None
     
-    if public_ip_name and exposed_ports:
-        # Port forwarding mode: Public IP with specific ports
+    if bidirectional and exposed_ports:
+        # Bidirectional mode: Public IP with specific ports (no subnet)
+        print(info("Configuring bidirectional connectivity with public IP"))
         ip_cfg = IpAddress(
             type="Public",
             ports=[Port(protocol=p["protocol"], port=p["port"]) 
                    for p in exposed_ports]
         )
+        # When using public IP, do NOT use subnet
+        subnet_ids = None
     elif expose_private_port:
         # Private IP mode (existing functionality)
         ip_cfg = IpAddress(type="Private", ports=[Port(protocol="TCP", port=expose_private_port)])
+        # Keep subnet for VNet connectivity
     else:
-        # No IP mode: Pure NAT Gateway egress
+        # Default: No IP mode - Pure NAT Gateway egress (CURRENT BEHAVIOR)
         ip_cfg = None
+        # Keep subnet for NAT Gateway
     
     # ... rest of existing code ...
     
@@ -176,11 +124,11 @@ def deploy(self, name, ..., public_ip_name=None, exposed_ports=None):
         location=location,
         containers=deploy_instances,
         os_type=os_type,
-        ip_address=ip_cfg,  # Public IP with forwarded ports or None
+        ip_address=ip_cfg,  # Public IP only if bidirectional=True
         image_registry_credentials=ir_credentials,
         restart_policy=restart_policy,
         tags=tags,
-        subnet_ids=subnet_ids,
+        subnet_ids=subnet_ids,  # None if bidirectional, otherwise use subnet
         identity=...
     )
 ```
@@ -190,23 +138,14 @@ def deploy(self, name, ..., public_ip_name=None, exposed_ports=None):
 Add new subcommands and handler methods:
 
 ```python
-# IP clean subcommand
+# IP clean subcommand (keep existing)
 ip_clean_parser = ip_subparsers.add_parser('clean', help='Clean IP configuration from local config')
 
-# IP create-forwarding subcommand
-ip_forwarding_parser = ip_subparsers.add_parser('create-forwarding', help='Create a public IP configured for port forwarding')
-ip_forwarding_parser.add_argument('name', help='Name for the public IP address')
-ip_forwarding_parser.add_argument('--ports', dest='forward_ports', action='append', 
-                                  help='Port to forward (format: PORT:PROTOCOL)')
-
-# IP ls-forwarding subcommand
-ip_ls_forwarding_parser = ip_subparsers.add_parser('ls-forwarding', help='List public IPs configured for port forwarding')
-
-# Add to run_parser
-run_parser.add_argument('--public-ip', dest='public_ip_name', 
-                       help='Name of public IP to use for port forwarding. Subnet config automatically derived.')
+# Add to run_parser ONLY (NOT fleet)
+run_parser.add_argument('--bidirectional', dest='bidirectional', action='store_true',
+                       help='Enable bidirectional connectivity (assigns public IP for inbound connections)')
 run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
-                       help='Port to expose (format: PORT:PROTOCOL). Requires --public-ip.')
+                       help='Port to expose (format: PORT:PROTOCOL). Requires --bidirectional.')
 
 # NEW: Add CPU and RAM arguments to run_parser
 run_parser.add_argument('--cpu', dest='cpu', type=float, default=1.0,
@@ -214,11 +153,7 @@ run_parser.add_argument('--cpu', dest='cpu', type=float, default=1.0,
 run_parser.add_argument('--ram', dest='ram', type=float, default=1.0,
                        help='RAM in GB to allocate (default: 1.0, max: 16.0)')
 
-# Add to fleet_parser
-fleet_parser.add_argument('--public-ip', dest='public_ip_name',
-                         help='Name of public IP for network configuration.')
-
-# NEW: Add CPU and RAM arguments to fleet_parser
+# NEW: Add CPU and RAM arguments to fleet_parser (NO --bidirectional flag)
 fleet_parser.add_argument('--cpu', dest='cpu', type=float, default=4.0,
                          help='Total CPU cores for fleet (default: 4.0, distributed across instances)')
 fleet_parser.add_argument('--ram', dest='ram', type=float, default=16.0,
@@ -228,18 +163,6 @@ fleet_parser.add_argument('--ram', dest='ram', type=float, default=16.0,
 Add Acido class methods:
 
 ```python
-def create_forwarding_ip(self, name, port_specs=None):
-    """Create a public IP for port forwarding."""
-    # Parse port specs and call network_manager.create_forwarding_ip()
-
-def list_forwarding_ips(self):
-    """List all public IPs configured for port forwarding."""
-    # Call network_manager.list_forwarding_ips()
-
-def rm_forwarding_ip(self, name):
-    """Remove a port forwarding public IP."""
-    # Call network_manager.delete_forwarding_ip()
-
 def clean_ip_config(self):
     """Clean IP configuration from local config."""
     self.public_ip_name = None
@@ -248,32 +171,18 @@ def clean_ip_config(self):
     self.subnet_name = None
     self.subnet_id = None
     self._save_config()
-
-def _derive_subnet_from_public_ip(self, public_ip_name):
-    """Automatically derive subnet configuration from public IP name."""
-    return f"{public_ip_name}-vnet", f"{public_ip_name}-subnet"
 ```
 
 Add command handlers in main execution block:
 
 ```python
-# Handle IP forwarding subcommands
+# Handle IP clean subcommand
 if args.subcommand == 'ip':
-    if args.ip_subcommand == 'create-forwarding':
-        acido.create_forwarding_ip(args.name, args.forward_ports)
-    elif args.ip_subcommand == 'ls-forwarding':
-        acido.list_forwarding_ips()
-    elif args.ip_subcommand == 'clean':
+    if args.ip_subcommand == 'clean':
         acido.clean_ip_config()
 
-# Handle run command with port forwarding
+# Handle run command with bidirectional
 elif args.subcommand == 'run':
-    # Warn if IP is selected in config but --public-ip is not specified
-    if acido.public_ip_name and not args.public_ip_name:
-        print(orange(f"Warning: IP '{acido.public_ip_name}' is selected in config but --public-ip not specified"))
-        print(info("To use port forwarding: add --public-ip {acido.public_ip_name}"))
-        print(info("To clear config: run 'acido ip clean'"))
-    
     # Parse exposed ports
     exposed_ports = None
     if args.expose_ports:
@@ -282,19 +191,17 @@ elif args.subcommand == 'run':
             port, protocol = spec.split(':')
             exposed_ports.append({"port": int(port), "protocol": protocol.upper()})
     
-    # Validate: If expose_ports is set, public_ip_name must also be set
-    if exposed_ports and not args.public_ip_name:
-        print(bad("--expose-port requires --public-ip to be specified"))
+    # Validate: If expose_ports is set, bidirectional must also be set
+    if exposed_ports and not args.bidirectional:
+        print(bad("--expose-port requires --bidirectional to be specified"))
         sys.exit(1)
     
-    # Automatically derive subnet from public IP if specified
-    vnet_name = None
-    subnet_name = None
-    if args.public_ip_name:
-        vnet_name, subnet_name = acido._derive_subnet_from_public_ip(args.public_ip_name)
-        print(info(f"Using network: {vnet_name}/{subnet_name} (derived from {args.public_ip_name})"))
+    # Validate: If bidirectional is set, expose_ports must also be set
+    if args.bidirectional and not exposed_ports:
+        print(bad("--bidirectional requires --expose-port to be specified"))
+        sys.exit(1)
     
-    # Call run with port forwarding parameters
+    # Call run with bidirectional parameters
     acido.run(
         name=args.name,
         image_name=args.image_name,
@@ -305,24 +212,14 @@ elif args.subcommand == 'run':
         quiet=args.quiet,
         cleanup=not args.no_cleanup,
         regions=args.region,
-        public_ip_name=args.public_ip_name,
+        bidirectional=args.bidirectional,  # NEW: Pass bidirectional flag
         exposed_ports=exposed_ports,
-        vnet_name=vnet_name,
-        subnet_name=subnet_name,
         cpu=args.cpu,  # NEW: Pass CPU argument
         ram=args.ram   # NEW: Pass RAM argument
     )
 
-# Similar updates for fleet command
+# Fleet command - NO CHANGES (always uses NAT Gateway)
 elif args.subcommand == 'fleet':
-    # ... existing warning and validation code ...
-    
-    # Automatically derive subnet from public IP if specified
-    vnet_name = None
-    subnet_name = None
-    if args.public_ip_name:
-        vnet_name, subnet_name = acido._derive_subnet_from_public_ip(args.public_ip_name)
-    
     acido.fleet(
         fleet_name=args.fleet_name,
         instance_num=args.num_instances,
@@ -335,25 +232,87 @@ elif args.subcommand == 'fleet':
         quiet=args.quiet,
         rm_when_done=args.rm_when_done,
         regions=args.region,
-        vnet_name=vnet_name,
-        subnet_name=subnet_name,
         max_cpu=args.cpu,  # NEW: Pass CPU argument (total for fleet)
         max_ram=args.ram   # NEW: Pass RAM argument (total for fleet)
     )
 ```
 
-Update `run()` and `fleet()` method signatures to accept new parameters:
+Update `run()` method signature to accept new parameters:
 
 ```python
 def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
         write_to_file: str = None, output_format: str = 'txt', 
         quiet: bool = False, cleanup: bool = True, regions=None,
-        public_ip_name: str = None, exposed_ports: list = None,
-        vnet_name: str = None, subnet_name: str = None,
+        bidirectional: bool = False, exposed_ports: list = None,
         cpu: float = 1.0, ram: float = 1.0):  # NEW: CPU and RAM parameters
     """
     Run a single ephemeral container instance.
     
+    New Args:
+        bidirectional (bool, optional): Enable bidirectional connectivity (assigns public IP)
+        exposed_ports (list, optional): List of port dicts to expose (requires bidirectional=True)
+        cpu (float, optional): CPU cores to allocate (default: 1.0, max: 4.0)
+        ram (float, optional): RAM in GB to allocate (default: 1.0, max: 16.0)
+    """
+    # Validate CPU and RAM
+    if cpu < 0.1 or cpu > 4.0:
+        raise ValueError(f"CPU must be between 0.1 and 4.0, got {cpu}")
+    if ram < 0.1 or ram > 16.0:
+        raise ValueError(f"RAM must be between 0.1 and 16.0 GB, got {ram}")
+    
+    # ... existing code ...
+    
+    # Pass bidirectional and ports to instance_manager.deploy()
+    result = self.instance_manager.deploy(
+        name=name,
+        image_name=full_image_url,
+        command=task,
+        location=selected_region,
+        env_vars=env_vars,
+        quiet=quiet,
+        bidirectional=bidirectional,  # NEW: Pass bidirectional flag
+        exposed_ports=exposed_ports,
+        max_cpu=cpu,  # Pass CPU
+        max_ram=ram,  # Pass RAM
+        instance_number=1  # Single instance for run command
+    )
+
+def fleet(self, fleet_name: str, instance_num: int, image_name: str,
+          scan_cmd: str = None, input_file: str = None, wait: int = None,
+          write_to_file: str = None, output_format: str = 'txt',
+          quiet: bool = False, rm_when_done: bool = False, regions=None,
+          max_cpu: float = 4.0, max_ram: float = 16.0):  # NEW: CPU and RAM parameters
+    """
+    Deploy a fleet of container instances.
+    
+    NOTE: Fleet ALWAYS uses NAT Gateway for egress (no bidirectional support).
+    
+    New Args:
+        max_cpu (float, optional): Total CPU cores for fleet (default: 4.0, distributed across instances)
+        max_ram (float, optional): Total RAM in GB for fleet (default: 16.0, distributed across instances)
+    """
+    # Validate CPU and RAM
+    if max_cpu < 0.1 or max_cpu > 100.0:  # Higher limit for fleets
+        raise ValueError(f"Total CPU must be between 0.1 and 100.0, got {max_cpu}")
+    if max_ram < 0.1 or max_ram > 256.0:  # Higher limit for fleets
+        raise ValueError(f"Total RAM must be between 0.1 and 256.0 GB, got {max_ram}")
+    
+    # ... existing code ...
+    
+    # Pass CPU and RAM to instance_manager.deploy()
+    # NOTE: bidirectional is NOT passed - fleet always uses NAT Gateway
+    results = self.instance_manager.deploy(
+        name=fleet_name,
+        image_name=full_image_url,
+        command=scan_cmd,
+        location=selected_region,
+        env_vars=env_vars,
+        quiet=quiet,
+        max_cpu=max_cpu,  # Pass total CPU
+        max_ram=max_ram,  # Pass total RAM
+        instance_number=instance_num
+    )
+```
     New Args:
         public_ip_name (str, optional): Name of public IP for port forwarding
         exposed_ports (list, optional): List of port dicts to expose
@@ -428,37 +387,59 @@ def fleet(self, fleet_name: str, instance_num: int, image_name: str,
 
 #### lambda_handler.py (`lambda_handler.py`)
 
-Add new operations:
+Update existing operations:
 
 ```python
 VALID_OPERATIONS = [
     'fleet', 'run', 'ls', 'rm', 
     'ip_create', 'ip_ls', 'ip_rm',
-    'ip_create_forwarding', 'ip_ls_forwarding', 'ip_clean'
+    'ip_clean'  # Only add ip_clean
 ]
 
 def lambda_handler(event, context):
     # ... existing code ...
-    
-    elif operation == 'ip_create_forwarding':
-        name = event.get('name')
-        ports = event.get('ports', [])
-        acido.create_forwarding_ip(name, ports)
-        return build_response({'operation': operation, 'result': {'created': name, 'ports': ports}})
-    
-    elif operation == 'ip_ls_forwarding':
-        ips = acido.network_manager.list_forwarding_ips() if acido.network_manager else []
-        return build_response({'operation': operation, 'result': {'ips': ips}})
     
     elif operation == 'ip_clean':
         acido.clean_ip_config()
         return build_response({'operation': operation, 'result': {'message': 'IP configuration cleaned'}})
     
     elif operation == 'run':
-        public_ip_name = event.get('public_ip_name')
+        bidirectional = event.get('bidirectional', False)  # NEW: Get bidirectional flag
         exposed_ports = event.get('exposed_ports', [])
         cpu = event.get('cpu', 1.0)  # NEW: Get CPU from event
         ram = event.get('ram', 1.0)  # NEW: Get RAM from event
+        
+        response, outputs = acido.run(
+            name=name,
+            image_name=full_image_url,
+            task=task,
+            duration=duration,
+            bidirectional=bidirectional,  # NEW: Pass bidirectional flag
+            exposed_ports=exposed_ports,
+            cpu=cpu,  # NEW: Pass CPU
+            ram=ram   # NEW: Pass RAM
+        )
+        # ... return response ...
+    
+    elif operation == 'fleet':
+        # Fleet unchanged - always uses NAT Gateway
+        max_cpu = event.get('max_cpu', 4.0)  # NEW: Get CPU from event
+        max_ram = event.get('max_ram', 16.0)  # NEW: Get RAM from event
+        
+        response, outputs = acido.fleet(
+            fleet_name=fleet_name,
+            instance_num=instance_num,
+            image_name=full_image_url,
+            scan_cmd=task,
+            input_file=input_file,
+            wait=wait,
+            quiet=True,
+            regions=regions,
+            max_cpu=max_cpu,  # NEW: Pass CPU
+            max_ram=max_ram   # NEW: Pass RAM
+        )
+        # ... return response ...
+```
         
         # Automatically derive subnet from public IP
         vnet_name = None
@@ -624,81 +605,72 @@ acido ip rm test-ip
    - Add IP configuration logic for port forwarding
 
 3. **Phase 3**: CLI commands
-   - Add `ip create-forwarding` subcommand
-   - Add `ip ls-forwarding` subcommand
    - Add `ip clean` subcommand
-   - Add `--public-ip` and `--expose-port` arguments to `run` command
-   - Add `--public-ip` argument to `fleet` command
+   - Add `--bidirectional` and `--expose-port` arguments to `run` command ONLY
    - **NEW**: Add `--cpu` and `--ram` arguments to `run` command
    - **NEW**: Add `--cpu` and `--ram` arguments to `fleet` command
 
 4. **Phase 4**: Acido class methods
-   - Implement `create_forwarding_ip()`
-   - Implement `list_forwarding_ips()`
-   - Implement `rm_forwarding_ip()`
    - Implement `clean_ip_config()`
-   - Implement `_derive_subnet_from_public_ip()`
-   - Update `run()` method signature with CPU and RAM parameters
-   - Update `fleet()` method signature with CPU and RAM parameters
+   - Update `run()` method signature with bidirectional, CPU and RAM parameters
+   - Update `fleet()` method signature with CPU and RAM parameters (NO bidirectional)
 
 5. **Phase 5**: Command handlers
-   - Add IP forwarding subcommand handlers
-   - Add config warning logic for `run` and `fleet`
-   - Add automatic subnet derivation logic
+   - Add IP clean subcommand handler
+   - Add bidirectional validation logic for `run`
    - **NEW**: Add CPU and RAM validation and passing to methods
 
 6. **Phase 6**: Lambda support
-   - Add new operations to `VALID_OPERATIONS`
-   - Implement `ip_create_forwarding` handler
-   - Implement `ip_ls_forwarding` handler
+   - Add `ip_clean` to `VALID_OPERATIONS`
    - Implement `ip_clean` handler
-   - Update `run` operation with automatic subnet derivation
+   - Update `run` operation with bidirectional support
    - **NEW**: Support CPU and RAM parameters in Lambda events
 
-7. **Phase 7**: Helper utilities
-   - Create `port_utils.py` with port parsing/validation
-
-8. **Phase 8**: Testing
-   - Write unit tests for port utilities
+7. **Phase 7**: Testing
+   - Write unit tests for bidirectional flag
    - Manual integration testing
    - Document test results
 
-9. **Phase 9**: Documentation updates
-   - Update README.md with port forwarding section
+8. **Phase 8**: Documentation updates
+   - Update README.md with bidirectional section
    - Update LAMBDA.md with new operations
    - Add examples to user-facing docs
 
 ### 6. Example Usage (Final Result)
 
 ```bash
-# Create network stack with port forwarding IP
-acido ip create-forwarding voip-ip --ports 5060:udp --ports 5060:tcp
-
-# Deploy VoIP server with automatic network configuration and custom resources
+# Deploy VoIP server with bidirectional connectivity and custom resources
 acido run asterisk-prod \
   -im asterisk:latest \
   -t "./start-asterisk.sh" \
-  --public-ip voip-ip \
+  --bidirectional \
   --expose-port 5060:udp \
   --expose-port 5060:tcp \
   --cpu 2.0 \
   --ram 4.0 \
   -d 86400
 
-# System automatically uses:
-#   VNet: voip-ip-vnet
-#   Subnet: voip-ip-subnet
-# No need to run 'acido ip select' or read from config!
+# System assigns public IP directly to container (no subnet/NAT Gateway)
+# Supports both inbound and outbound connectivity
 
-# List forwarding IPs
-acido ip ls-forwarding
+# Default behavior unchanged (egress-only via NAT Gateway)
+acido run nginx-server \
+  -im nginx:latest \
+  -d 3600
+
+# Fleet always uses NAT Gateway (no --bidirectional option)
+acido fleet scan-fleet \
+  -im nmap:latest \
+  -t "nmap -iL input" \
+  --cpu 10.0 \
+  --ram 20.0 \
+  -n 10
 
 # Clean config when done
 acido ip clean
 
 # Remove everything
 acido rm asterisk-prod
-acido ip rm voip-ip
 ```
 
 ### 7. Lambda Example
@@ -709,7 +681,7 @@ acido ip rm voip-ip
   "name": "voip-server",
   "image": "asterisk",
   "task": "./start-asterisk.sh",
-  "public_ip_name": "voip-ip",
+  "bidirectional": true,
   "exposed_ports": [
     {"port": 5060, "protocol": "UDP"},
     {"port": 5060, "protocol": "TCP"}
@@ -738,24 +710,27 @@ Fleet example with custom resources:
 ### 8. Success Criteria
 
 - ✅ All CLI commands work as documented
-- ✅ Automatic subnet derivation functions correctly
-- ✅ Config warnings display when appropriate
 - ✅ `ip clean` command clears config
-- ✅ Port forwarding works end-to-end (inbound connectivity verified)
+- ✅ **Bidirectional connectivity** works end-to-end (inbound connectivity verified)
+- ✅ **Default behavior unchanged** (egress-only via NAT Gateway works)
+- ✅ **Fleet always uses NAT Gateway** (no bidirectional support)
 - ✅ **NEW**: CPU and RAM arguments work for both `run` and `fleet` commands
 - ✅ **NEW**: Resource limits are validated (CPU: 0.1-4.0 for run, 0.1-100 for fleet; RAM: 0.1-16 for run, 0.1-256 for fleet)
 - ✅ Lambda operations function correctly
 - ✅ Unit tests pass
 - ✅ Integration tests pass
 - ✅ Documentation is complete and accurate
-- ✅ Backward compatibility maintained (no breaking changes)
+- ✅ **100% Backward compatibility maintained** (no breaking changes)
 
 ### 9. Important Notes
 
-- **100% Backward Compatible**: Existing containers without `--public-ip` continue to use NAT Gateway for egress
-- **No Config Dependency**: Automatic subnet derivation eliminates need to read from config file
-- **Cost**: ~$13/month per container with port forwarding (Public IP $3.60 + Container $9.40)
-- **Security**: Containers with public IPs are directly exposed to internet - ensure application-level auth and rate limiting
+- **100% Backward Compatible**: Default behavior unchanged - containers use NAT Gateway for egress-only
+- **Bidirectional Only for Run**: `--bidirectional` flag only available for `acido run`, NOT for `acido fleet`
+- **Fleet Always Uses NAT Gateway**: Fleet containers share single egress IP (useful for massive scanning)
+- **Cost**: 
+  - Default (egress-only): ~$9.40/month per container
+  - With `--bidirectional`: ~$13/month per container (adds Public IP $3.60)
+- **Security**: Containers with `--bidirectional` are directly exposed to internet - ensure application-level auth and rate limiting
 - **NEW - Resource Limits**: Azure Container Instances resource limits:
   - **Single Container (run)**: CPU: 0.1-4.0 cores, RAM: 0.1-16.0 GB
   - **Fleet (total across instances)**: CPU: 0.1-100+ cores, RAM: 0.1-256+ GB
@@ -782,8 +757,8 @@ If anything is unclear:
 
 ---
 
-**Estimated Effort**: 2-3 days for Phase 1 implementation (all features listed above)
+**Estimated Effort**: 1-2 days for Phase 1 implementation (simplified approach)
 
 **Priority**: High - This enables critical use cases (VoIP, game servers, SSH bastions)
 
-**Risk**: Low - Uses standard Azure features, backward compatible, well-documented
+**Risk**: Low - Uses standard Azure features, backward compatible, simpler than original design
