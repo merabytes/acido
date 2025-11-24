@@ -469,7 +469,20 @@ class Acido(object):
         self.user_assigned = {}
         self.rg = None
         
-        # NEW: Network configuration using subnet delegation instead of NetworkProfile
+        # Network configuration - separated into egress and ingress
+        # Egress (NAT Gateway) - for fleet operations
+        self.egress_public_ip_name = None
+        self.egress_public_ip_id = None
+        self.egress_vnet_name = None
+        self.egress_subnet_name = None
+        
+        # Ingress (Firewall) - for run operations with firewall
+        self.firewall_name = None
+        self.firewall_public_ip = None
+        self.ingress_vnet_name = None
+        self.ingress_subnet_name = None
+        
+        # Legacy fields for backward compatibility
         self.public_ip_name = None
         self.public_ip_id = None
         self.vnet_name = None
@@ -585,7 +598,17 @@ class Acido(object):
             'image_registry_server': self.image_registry_server,
             'storage_account': self.storage_account,
             'user_assigned_id': self.user_assigned,
-            # NEW: Store network configuration
+            # Egress (NAT Gateway) configuration - for fleet operations
+            'egress_public_ip_name': self.egress_public_ip_name,
+            'egress_public_ip_id': self.egress_public_ip_id,
+            'egress_vnet_name': self.egress_vnet_name,
+            'egress_subnet_name': self.egress_subnet_name,
+            # Ingress (Firewall) configuration - for run operations
+            'firewall_name': self.firewall_name,
+            'firewall_public_ip': self.firewall_public_ip,
+            'ingress_vnet_name': self.ingress_vnet_name,
+            'ingress_subnet_name': self.ingress_subnet_name,
+            # Legacy fields for backward compatibility
             'public_ip_name': self.public_ip_name,
             'public_ip_id': self.public_ip_id,
             'vnet_name': self.vnet_name,
@@ -645,7 +668,13 @@ class Acido(object):
             self.network_manager.create_virtual_network(vnet_name)
             subnet = self.network_manager.create_subnet(vnet_name, subnet_name, public_ip_id=pip_id, subnet_cidr="10.0.1.0/24")
 
-            # 3) Save config (names + IDs)
+            # 3) Save config for egress (NAT Gateway) - used by fleet
+            self.egress_public_ip_name = public_ip_name
+            self.egress_public_ip_id = pip_id
+            self.egress_vnet_name = vnet_name
+            self.egress_subnet_name = subnet_name
+            
+            # Also save to legacy fields for backward compatibility
             self.public_ip_name = public_ip_name
             self.public_ip_id = pip_id
             self.vnet_name = vnet_name
@@ -653,7 +682,7 @@ class Acido(object):
             self.subnet_id = subnet.id
 
             self._save_config()
-            print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
+            print(good(f"Egress network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (NAT Gateway for fleet)"))
         else:
             # Standalone IP - no NAT stack, clear any vnet/subnet config
             self.public_ip_name = public_ip_name
@@ -801,12 +830,44 @@ class Acido(object):
         
         self._save_config()
         print(good("IP configuration cleaned from local config"))
+    
+    def ensure_ingress_subnet(self, vnet_name, subnet_name="container-subnet"):
+        """
+        Ensure a delegated subnet exists for container instances (ingress with firewall).
+        Creates the subnet if it doesn't exist.
+        
+        Args:
+            vnet_name (str): Virtual Network name
+            subnet_name (str): Subnet name (default: container-subnet)
+            
+        Returns:
+            Subnet: Subnet resource
+        """
+        try:
+            # Try to get existing subnet
+            subnet = self.network_manager._client.subnets.get(
+                self.network_manager.resource_group,
+                vnet_name,
+                subnet_name
+            )
+            print(good(f"Using existing subnet: {subnet_name}"))
+            return subnet
+        except:
+            # Subnet doesn't exist, create it
+            print(info(f"Creating delegated subnet: {subnet_name}"))
+            subnet = self.network_manager.create_delegated_subnet(
+                vnet_name=vnet_name,
+                subnet_name=subnet_name,
+                subnet_cidr="10.0.2.0/24"
+            )
+            return subnet
 
     # ==================== Azure Firewall Methods (Solution 4) ====================
     
     def create_firewall(self, firewall_name, vnet_name, subnet_name, public_ip_name):
         """
         Create an Azure Firewall for enterprise port forwarding (Solution 4).
+        Also ensures a delegated subnet exists for container instances.
         
         Args:
             firewall_name (str): Name for the Azure Firewall
@@ -826,12 +887,39 @@ class Acido(object):
             print(orange("Cost: ~$1.25/hour (~$900/month)"))
             print(info("This operation may take 5-10 minutes..."))
             
+            # Ensure container subnet exists (separate from firewall subnet)
+            container_subnet_name = "container-ingress-subnet"
+            print(info(f"Ensuring container subnet exists: {container_subnet_name}"))
+            self.ensure_ingress_subnet(vnet_name, container_subnet_name)
+            
             firewall = self.firewall_manager.create_firewall(
                 firewall_name=firewall_name,
                 vnet_name=vnet_name,
                 subnet_name=subnet_name,
                 public_ip_name=public_ip_name
             )
+            
+            if firewall:
+                # Get the public IP address
+                try:
+                    pip = self.network_manager.get_public_ip(public_ip_name)
+                    firewall_public_ip = pip.ip_address
+                except Exception as e:
+                    print(orange(f"Warning: Could not retrieve firewall public IP: {e}"))
+                    firewall_public_ip = None
+                
+                # Save firewall configuration
+                self.firewall_name = firewall_name
+                self.firewall_public_ip = firewall_public_ip
+                self.ingress_vnet_name = vnet_name
+                self.ingress_subnet_name = container_subnet_name  # Use container subnet, not firewall subnet
+                self._save_config()
+                
+                print(good(f"Firewall configuration saved to config"))
+                if firewall_public_ip:
+                    print(good(f"Firewall public IP: {firewall_public_ip}"))
+                print(good(f"Container subnet for ingress: {container_subnet_name}"))
+            
             return firewall
         except Exception as e:
             print(bad(f"Failed to create firewall: {str(e)}"))
@@ -952,7 +1040,18 @@ class Acido(object):
         
         try:
             print(orange(f"Deleting Azure Firewall '{firewall_name}' (may save ~$900/month)"))
-            return self.firewall_manager.delete_firewall(firewall_name)
+            result = self.firewall_manager.delete_firewall(firewall_name)
+            
+            # Clear firewall configuration from config if it matches
+            if result and self.firewall_name == firewall_name:
+                self.firewall_name = None
+                self.firewall_public_ip = None
+                self.ingress_vnet_name = None
+                self.ingress_subnet_name = None
+                self._save_config()
+                print(good("Firewall configuration cleared from config"))
+            
+            return result
         except Exception as e:
             print(bad(f"Failed to delete firewall: {str(e)}"))
             return False
@@ -1068,8 +1167,8 @@ class Acido(object):
                             image_name=image_name,
                             input_files=input_files,
                             command=scan_cmd,
-                            vnet_name=self.vnet_name,
-                            subnet_name=self.subnet_name,
+                            vnet_name=self.egress_vnet_name if self.egress_vnet_name else self.vnet_name,
+                            subnet_name=self.egress_subnet_name if self.egress_subnet_name else self.subnet_name,
                             env_vars=env_vars,
                             quiet=quiet,
                             location=selected_region,
@@ -1109,8 +1208,8 @@ class Acido(object):
                 image_name=image_name,
                 command=scan_cmd,
                 env_vars=env_vars,
-                vnet_name=self.vnet_name,
-                subnet_name=self.subnet_name,
+                vnet_name=self.egress_vnet_name if self.egress_vnet_name else self.vnet_name,
+                subnet_name=self.egress_subnet_name if self.egress_subnet_name else self.subnet_name,
                 input_files=input_files,
                 quiet=quiet,
                 location=selected_region,
@@ -1275,9 +1374,24 @@ class Acido(object):
         response = {}
         outputs = {}
         
-        # Handle bidirectional connectivity
+        # Determine subnet configuration based on firewall or bidirectional mode
+        use_vnet = None
+        use_subnet = None
         public_ip_id = None
-        if bidirectional:
+        
+        # Check if firewall is configured (ingress mode)
+        if self.firewall_name and self.firewall_public_ip:
+            # Firewall mode: Use ingress subnet, inject firewall IP as env var
+            use_vnet = self.ingress_vnet_name
+            use_subnet = self.ingress_subnet_name
+            env_vars['FIREWALL_PUBLIC_IP'] = self.firewall_public_ip
+            env_vars['FIREWALL_NAME'] = self.firewall_name
+            print_if_not_quiet(good(f"Using firewall ingress: {self.firewall_name}"))
+            print_if_not_quiet(info(f"Firewall public IP injected: {self.firewall_public_ip}"))
+            print_if_not_quiet(info(f"Container will use private IP in subnet: {use_subnet}"))
+            
+        elif bidirectional:
+            # Bidirectional mode: Direct public IP assignment
             if not exposed_ports:
                 print(bad("--bidirectional requires --expose-port to be specified"))
                 raise ValueError("--bidirectional requires --expose-port")
@@ -1294,6 +1408,11 @@ class Acido(object):
             else:
                 print(bad("No public IP selected. Please run 'acido ip select' or 'acido ip create' first"))
                 raise ValueError("No public IP selected for bidirectional mode")
+        
+        else:
+            # Default mode: Use legacy vnet/subnet if available
+            use_vnet = self.vnet_name
+            use_subnet = self.subnet_name
         
         # Deploy the single instance
         print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
@@ -1317,8 +1436,8 @@ class Acido(object):
             image_name=image_name,
             command=command_to_execute,
             env_vars=env_vars,
-            vnet_name=self.vnet_name,
-            subnet_name=self.subnet_name,
+            vnet_name=use_vnet,
+            subnet_name=use_subnet,
             input_files=None,
             quiet=quiet,
             location=selected_region,
