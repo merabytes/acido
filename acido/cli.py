@@ -29,6 +29,9 @@ __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 # Constants
 ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
 
+# Network constants
+FIREWALL_CONTAINER_SUBNET_NAME = "container-ingress-subnet"  # Default subnet name for containers when using firewall
+
 # List of all supported Azure regions (47 total)
 AZURE_REGIONS = [
     'australiacentral', 'australiaeast', 'australiasoutheast',
@@ -852,7 +855,7 @@ class Acido(object):
             )
             print(good(f"Using existing subnet: {subnet_name}"))
             return subnet
-        except:
+        except Exception as e:
             # Subnet doesn't exist, create it
             print(info(f"Creating delegated subnet: {subnet_name}"))
             subnet = self.network_manager.create_delegated_subnet(
@@ -888,7 +891,7 @@ class Acido(object):
             print(info("This operation may take 5-10 minutes..."))
             
             # Ensure container subnet exists (separate from firewall subnet)
-            container_subnet_name = "container-ingress-subnet"
+            container_subnet_name = FIREWALL_CONTAINER_SUBNET_NAME
             print(info(f"Ensuring container subnet exists: {container_subnet_name}"))
             self.ensure_ingress_subnet(vnet_name, container_subnet_name)
             
