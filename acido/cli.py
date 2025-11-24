@@ -200,6 +200,52 @@ ip_select_parser = ip_subparsers.add_parser('select', help='Select an IPv4 addre
 # IP clean subcommand
 ip_clean_parser = ip_subparsers.add_parser('clean', help='Clean IP configuration from local config (removes selected IP from config)')
 
+# Firewall subcommand for Azure Firewall (Enterprise Solution 4)
+firewall_parser = subparsers.add_parser('firewall', help='Manage Azure Firewall for enterprise port forwarding (Solution 4)')
+firewall_subparsers = firewall_parser.add_subparsers(dest='firewall_subcommand', help='Firewall management commands')
+
+# Firewall create subcommand
+firewall_create_parser = firewall_subparsers.add_parser('create', help='Create Azure Firewall with DNAT support (~$900/month)')
+firewall_create_parser.add_argument('name', help='Name for the Azure Firewall')
+firewall_create_parser.add_argument('--vnet', dest='vnet_name', required=True, help='Virtual Network name')
+firewall_create_parser.add_argument('--subnet', dest='subnet_name', default='AzureFirewallSubnet', 
+                                    help='Firewall subnet name (default: AzureFirewallSubnet, must be /26 or larger)')
+firewall_create_parser.add_argument('--public-ip', dest='public_ip_name', required=True, 
+                                    help='Public IP name to assign to firewall')
+
+# Firewall add-rule subcommand
+firewall_add_rule_parser = firewall_subparsers.add_parser('add-rule', help='Add DNAT rule to forward traffic to container')
+firewall_add_rule_parser.add_argument('firewall_name', help='Name of the Azure Firewall')
+firewall_add_rule_parser.add_argument('--rule-name', dest='rule_name', required=True, help='Name for the DNAT rule')
+firewall_add_rule_parser.add_argument('--collection', dest='collection_name', default='default-dnat', 
+                                      help='NAT rule collection name (default: default-dnat)')
+firewall_add_rule_parser.add_argument('--source', dest='source_addresses', action='append', default=['*'],
+                                      help='Source IP addresses (default: *, can specify multiple times)')
+firewall_add_rule_parser.add_argument('--dest-ip', dest='destination_address', required=True,
+                                      help='Firewall public IP address (destination)')
+firewall_add_rule_parser.add_argument('--dest-port', dest='destination_port', required=True,
+                                      help='Destination port on firewall')
+firewall_add_rule_parser.add_argument('--target-ip', dest='translated_address', required=True,
+                                      help='Container private IP address (target)')
+firewall_add_rule_parser.add_argument('--target-port', dest='translated_port', required=True,
+                                      help='Container port (target)')
+firewall_add_rule_parser.add_argument('--protocol', dest='protocol', choices=['TCP', 'UDP', 'Any'], default='TCP',
+                                      help='Protocol (TCP, UDP, or Any)')
+
+# Firewall delete-rule subcommand
+firewall_delete_rule_parser = firewall_subparsers.add_parser('delete-rule', help='Delete DNAT rule from firewall')
+firewall_delete_rule_parser.add_argument('firewall_name', help='Name of the Azure Firewall')
+firewall_delete_rule_parser.add_argument('--rule-name', dest='rule_name', required=True, help='Name of the DNAT rule to delete')
+firewall_delete_rule_parser.add_argument('--collection', dest='collection_name', default='default-dnat',
+                                         help='NAT rule collection name (default: default-dnat)')
+
+# Firewall ls subcommand
+firewall_ls_parser = firewall_subparsers.add_parser('ls', help='List all Azure Firewalls')
+
+# Firewall rm subcommand
+firewall_rm_parser = firewall_subparsers.add_parser('rm', help='Remove Azure Firewall')
+firewall_rm_parser.add_argument('name', help='Name of the Azure Firewall to remove')
+
 # Select subcommand
 select_parser = subparsers.add_parser('select', help='Select instances by name/regex')
 select_parser.add_argument('pattern', help='Name or regex pattern to select')
@@ -384,6 +430,21 @@ if args.subcommand == 'ip':
         elif args.ip_subcommand == 'clean':
             args.clean_ip = True
 
+# Handle firewall subcommand (Azure Firewall - Solution 4)
+if args.subcommand == 'firewall':
+    if hasattr(args, 'firewall_subcommand') and args.firewall_subcommand:
+        if args.firewall_subcommand == 'create':
+            args.create_firewall = True
+            args.firewall_name = args.name
+        elif args.firewall_subcommand == 'ls':
+            args.list_firewalls = True
+        elif args.firewall_subcommand == 'rm':
+            args.remove_firewall = args.name
+        elif args.firewall_subcommand == 'add-rule':
+            args.add_firewall_rule = True
+        elif args.firewall_subcommand == 'delete-rule':
+            args.delete_firewall_rule = True
+
 instances_outputs = {}
 
 def build_output(result):
@@ -497,6 +558,10 @@ class Acido(object):
         self.all_instances, self.instances_named = self.ls(interactive=False)
 
         self.network_manager = NetworkManager(resource_group=self.rg)
+        
+        # Initialize FirewallManager for Azure Firewall (Solution 4)
+        from acido.azure_utils.FirewallManager import FirewallManager
+        self.firewall_manager = FirewallManager(resource_group=self.rg)
 
         if args.create_ip:
             public_ip_name = args.create_ip
@@ -736,6 +801,163 @@ class Acido(object):
         
         self._save_config()
         print(good("IP configuration cleaned from local config"))
+
+    # ==================== Azure Firewall Methods (Solution 4) ====================
+    
+    def create_firewall(self, firewall_name, vnet_name, subnet_name, public_ip_name):
+        """
+        Create an Azure Firewall for enterprise port forwarding (Solution 4).
+        
+        Args:
+            firewall_name (str): Name for the Azure Firewall
+            vnet_name (str): Virtual Network name
+            subnet_name (str): Firewall subnet name (must be "AzureFirewallSubnet")
+            public_ip_name (str): Public IP name to assign to firewall
+            
+        Returns:
+            AzureFirewall: Created firewall resource or None on failure
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return None
+        
+        try:
+            print(orange("Creating Azure Firewall (Enterprise Solution 4)"))
+            print(orange("Cost: ~$1.25/hour (~$900/month)"))
+            print(info("This operation may take 5-10 minutes..."))
+            
+            firewall = self.firewall_manager.create_firewall(
+                firewall_name=firewall_name,
+                vnet_name=vnet_name,
+                subnet_name=subnet_name,
+                public_ip_name=public_ip_name
+            )
+            return firewall
+        except Exception as e:
+            print(bad(f"Failed to create firewall: {str(e)}"))
+            return None
+    
+    def add_firewall_rule(self, firewall_name, rule_name, collection_name, 
+                         source_addresses, destination_address, destination_port,
+                         translated_address, translated_port, protocol):
+        """
+        Add a DNAT rule to forward traffic from firewall to container.
+        
+        Args:
+            firewall_name (str): Name of the Azure Firewall
+            rule_name (str): Name for the DNAT rule
+            collection_name (str): NAT rule collection name
+            source_addresses (list): List of source IP addresses
+            destination_address (str): Firewall public IP address
+            destination_port (str): Destination port on firewall
+            translated_address (str): Container private IP address
+            translated_port (str): Container port
+            protocol (str): Protocol (TCP, UDP, or Any)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            self.firewall_manager.create_dnat_rule(
+                firewall_name=firewall_name,
+                rule_collection_name=collection_name,
+                rule_name=rule_name,
+                source_addresses=source_addresses,
+                destination_address=destination_address,
+                destination_port=destination_port,
+                translated_address=translated_address,
+                translated_port=translated_port,
+                protocol=protocol
+            )
+            return True
+        except Exception as e:
+            print(bad(f"Failed to add DNAT rule: {str(e)}"))
+            return False
+    
+    def delete_firewall_rule(self, firewall_name, collection_name, rule_name):
+        """
+        Delete a DNAT rule from firewall.
+        
+        Args:
+            firewall_name (str): Name of the Azure Firewall
+            collection_name (str): NAT rule collection name
+            rule_name (str): Name of the DNAT rule to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            return self.firewall_manager.delete_dnat_rule(
+                firewall_name=firewall_name,
+                rule_collection_name=collection_name,
+                rule_name=rule_name
+            )
+        except Exception as e:
+            print(bad(f"Failed to delete DNAT rule: {str(e)}"))
+            return False
+    
+    def list_firewalls(self):
+        """
+        List all Azure Firewalls in the resource group.
+        
+        Returns:
+            list: List of firewall information dicts
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return []
+        
+        try:
+            firewalls = self.firewall_manager.list_firewalls()
+            
+            if not firewalls:
+                print(info("No Azure Firewalls found."))
+                return []
+            
+            print(good("Azure Firewalls:"))
+            for fw in firewalls:
+                print(f"  {bold(fw['name'])} ({fw['sku_tier']})")
+                print(f"    Public IP: {green(fw['public_ip'])}")
+                print(f"    DNAT Rules: {fw['dnat_rules']}")
+                print(f"    Status: {fw['provisioning_state']}")
+                print(f"    Location: {fw['location']}")
+                print(f"    Cost: {orange('~$1.25/hour (~$900/month)')}")
+            
+            return firewalls
+        except Exception as e:
+            print(bad(f"Failed to list firewalls: {str(e)}"))
+            return []
+    
+    def delete_firewall(self, firewall_name):
+        """
+        Delete an Azure Firewall.
+        
+        Args:
+            firewall_name (str): Name of the firewall to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            print(orange(f"Deleting Azure Firewall '{firewall_name}' (may save ~$900/month)"))
+            return self.firewall_manager.delete_firewall(firewall_name)
+        except Exception as e:
+            print(bad(f"Failed to delete firewall: {str(e)}"))
+            return False
+
+    # ==================== End of Firewall Methods ====================
 
     def ls(self, interactive=True):
         all_instances = {}
@@ -2480,6 +2702,38 @@ def main():
     if args.create_ip:
         with_nat_stack = getattr(args, 'with_nat_stack', False)
         acido.create_ipv4_address(args.create_ip, with_nat_stack=with_nat_stack)
+    
+    # Handle firewall commands (Azure Firewall - Solution 4)
+    if hasattr(args, 'create_firewall') and args.create_firewall:
+        acido.create_firewall(
+            firewall_name=args.firewall_name,
+            vnet_name=args.vnet_name,
+            subnet_name=args.subnet_name,
+            public_ip_name=args.public_ip_name
+        )
+    if hasattr(args, 'list_firewalls') and args.list_firewalls:
+        acido.list_firewalls()
+    if hasattr(args, 'remove_firewall') and args.remove_firewall:
+        acido.delete_firewall(args.remove_firewall)
+    if hasattr(args, 'add_firewall_rule') and args.add_firewall_rule:
+        acido.add_firewall_rule(
+            firewall_name=args.firewall_name,
+            rule_name=args.rule_name,
+            collection_name=args.collection_name,
+            source_addresses=args.source_addresses,
+            destination_address=args.destination_address,
+            destination_port=args.destination_port,
+            translated_address=args.translated_address,
+            translated_port=args.translated_port,
+            protocol=args.protocol
+        )
+    if hasattr(args, 'delete_firewall_rule') and args.delete_firewall_rule:
+        acido.delete_firewall_rule(
+            firewall_name=args.firewall_name,
+            collection_name=args.collection_name,
+            rule_name=args.rule_name
+        )
+    
     if args.create_image:
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)
