@@ -5,7 +5,7 @@ This module provides a lightweight client for interacting with acido Lambda func
 via REST API, supporting all operations including fleet, run, ls, rm, and IP management.
 """
 
-__version__ = '0.50.0'
+__version__ = '0.51.0'
 
 from .client import AcidoClient, AcidoClientError
 

@@ -17,7 +17,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 setup(
     name='acido-client',
     packages=['acido_client'],
-    version='0.50.0',
+    version='0.51.0',
     description='REST API client for acido Lambda functions',
     long_description=readme,
     long_description_content_type='text/markdown',

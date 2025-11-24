@@ -29,6 +29,8 @@ Whether you’re building a secure secret-sharing system, a distributor of short
 - [Quick Start](#quick-start)
 - [CLI Reference](#cli-reference)
 - [Examples](#examples)
+  - [IP Address Routing](#ip-address-routing)
+  - [Port Forwarding (Bidirectional Connectivity)](#port-forwarding-bidirectional-connectivity)
 - [Docker Usage](#docker-usage)
 - [AWS Lambda Support](#aws-lambda-support)
   - [REST API Client (acido-client)](#rest-api-client-acido-client)
@@ -216,16 +218,141 @@ acido rm 'scan-*'
 ### IP Address Routing
 
 ```bash
-# Create and use static IP
-acido ip create pentest-ip
+# Create standalone public IP (no NAT Gateway stack)
+acido ip create my-ip
+
+# Create public IP with full NAT Gateway stack for egress
+acido ip create nat-ip --with-nat-stack
+
+# Select IP for use with containers
 acido ip select
 
-# Deploy with IP routing (containers use selected IP)
+# Deploy with IP routing (containers use selected IP for egress)
 acido fleet scan -n 10 -im nmap -t 'nmap -iL input' -i targets.txt
 
+# List all IPs (shows NAT stack indicator)
+acido ip ls
+
+# Clean IP configuration from local config
+acido ip clean
+
 # Cleanup
-acido ip rm pentest-ip
+acido ip rm my-ip
 ```
+
+### Port Forwarding (Bidirectional Connectivity)
+
+Acido supports bidirectional connectivity for containers that need to accept inbound connections (e.g., VoIP servers, game servers, SSH bastions).
+
+**Key Concepts:**
+- **Default behavior**: Containers use NAT Gateway for egress-only (no changes to existing workflows)
+- **Bidirectional mode**: Use `--bidirectional` flag with `acido run` to enable inbound connectivity
+- **Public IP assignment**: Bidirectional containers get a dedicated public IP for inbound traffic
+- **Fleet unchanged**: `acido fleet` always uses NAT Gateway (no bidirectional support)
+
+**Examples:**
+
+```bash
+# 1. Create a standalone public IP (no NAT Gateway needed for bidirectional)
+acido ip create voip-ip
+acido ip select
+
+# 2. Deploy VoIP server with bidirectional connectivity
+acido run voip-server \
+  -im asterisk:latest \
+  -t "./start-asterisk.sh" \
+  --bidirectional \
+  --expose-port 5060:udp \
+  --expose-port 5060:tcp \
+  --cpu 4 \
+  --ram 8 \
+  -d 86400
+
+# 3. Deploy game server (Minecraft)
+acido run minecraft \
+  -im minecraft-server:latest \
+  -t "./start.sh" \
+  --bidirectional \
+  --expose-port 25565:tcp \
+  --cpu 2 \
+  --ram 4 \
+  --no-cleanup
+
+# 4. Deploy SSH bastion (time-limited for security)
+acido run ssh-bastion \
+  -im ubuntu:20.04 \
+  -t "service ssh start && sleep infinity" \
+  --bidirectional \
+  --expose-port 22:tcp \
+  -d 3600  # Auto-cleanup after 1 hour
+
+# 5. Custom resource allocation for fleet (no bidirectional support)
+acido fleet scan -n 10 -im nmap \
+  -t 'nmap -iL input' -i targets.txt \
+  --cpu 8 --ram 16
+```
+
+**Important Notes:**
+- The `--bidirectional` flag is **only available** for `acido run` (single containers)
+- `acido fleet` does NOT support `--bidirectional` (fleet always uses NAT Gateway for egress)
+- The `--expose-port` format is `PORT:PROTOCOL` (e.g., `5060:udp`, `8080:tcp`)
+- Multiple ports can be exposed by repeating `--expose-port`
+- Container IP is printed after deployment for easy access
+- Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)
+  - Default for `acido run`: 4 CPU cores, 16 GB RAM (when not specified)
+  - Default for `acido fleet`: 8 CPU cores, 8 GB RAM (when not specified) - reduced to fit within Azure quota limits
+- **For `acido run`**: `--entrypoint` and `--task` are both optional - if not provided, uses the default entrypoint/cmd from the Docker image
+- **For `acido fleet`**: `--task` is **required** to specify the command to execute across the fleet
+
+**Command Execution:**
+- `--task` / `-t`: Override the container's CMD (command to execute)
+  - Optional for `acido run` (uses image default if not provided)
+  - **Required** for `acido fleet`
+- `--entrypoint`: Override the container's ENTRYPOINT (optional for `acido run`)
+- Both can be used together: entrypoint is executed with task as arguments
+
+### Environment Variables
+
+Both `acido run` and `acido fleet` support setting custom environment variables using the `-e` or `--env` flag, similar to Docker.
+
+**Two formats supported:**
+1. `KEY=value` - Set KEY to the specified value
+2. `KEY` - Use value from your current environment
+
+**Examples:**
+
+```bash
+# Set environment variables with explicit values
+acido run myapp \
+  -im myapp:latest \
+  -e DEBUG=true \
+  -e LOG_LEVEL=info \
+  -e API_KEY=secret123
+
+# Use environment variables from your shell
+export DATABASE_URL="postgresql://localhost/mydb"
+export API_TOKEN="xyz789"
+
+acido run myapp \
+  -im myapp:latest \
+  -e DATABASE_URL \
+  -e API_TOKEN \
+  -e APP_ENV=production
+
+# Works with fleet too
+acido fleet workers -n 5 \
+  -im worker:latest \
+  -t "python worker.py" \
+  -e WORKER_POOL=large \
+  -e REDIS_URL \
+  -e DEBUG=false
+```
+
+**Notes:**
+- Multiple `-e` flags can be specified
+- Custom env vars are merged with acido's built-in environment variables
+- If a KEY is not found in your environment, a warning is shown and it's skipped
+
 
 ## Docker Usage
 

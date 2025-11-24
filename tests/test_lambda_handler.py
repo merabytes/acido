@@ -314,8 +314,8 @@ class TestLambdaHandler(unittest.TestCase):
         self.assertIn('result', body)
         self.assertEqual(body['result']['created'], 'pentest-ip')
         
-        # Verify create_ipv4_address was called with correct name
-        mock_acido.create_ipv4_address.assert_called_once_with('pentest-ip')
+        # Verify create_ipv4_address was called with correct name and default with_nat_stack
+        mock_acido.create_ipv4_address.assert_called_once_with('pentest-ip', with_nat_stack=False)
 
     @patch('lambda_handler.Acido')
     def test_ip_ls_operation(self, mock_acido_class):
