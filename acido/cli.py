@@ -29,6 +29,9 @@ __coauthor__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 # Constants
 ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
 
+# Network constants
+FIREWALL_CONTAINER_SUBNET_NAME = "container-ingress-subnet"  # Default subnet name for containers when using firewall
+
 # List of all supported Azure regions (47 total)
 AZURE_REGIONS = [
     'australiacentral', 'australiaeast', 'australiasoutheast',
@@ -164,7 +167,7 @@ run_parser.add_argument('--region', dest='region', action='append', help='Azure 
 run_parser.add_argument('--bidirectional', dest='bidirectional', action='store_true', 
                          help='Enable bidirectional connectivity (assigns public IP for inbound connections). Requires --expose-port.')
 run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
-                         help='Port to expose in format PORT:PROTOCOL (e.g., 5060:udp, 8080:tcp). Can be specified multiple times. Requires --bidirectional.')
+                         help='Port(s) to expose in format PORT:PROTOCOL or PORT_START-PORT_END:PROTOCOL (e.g., 5060:udp, 8080:tcp, 5060-5070:udp for range). Can be specified multiple times. Requires --bidirectional or firewall configured.')
 run_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores (default: 4)')
 run_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB (default: 16)')
 run_parser.add_argument('-e', '--env', dest='env_vars', action='append',
@@ -199,6 +202,52 @@ ip_select_parser = ip_subparsers.add_parser('select', help='Select an IPv4 addre
 
 # IP clean subcommand
 ip_clean_parser = ip_subparsers.add_parser('clean', help='Clean IP configuration from local config (removes selected IP from config)')
+
+# Firewall subcommand for Azure Firewall (Enterprise Solution 4)
+firewall_parser = subparsers.add_parser('firewall', help='Manage Azure Firewall for enterprise port forwarding (Solution 4)')
+firewall_subparsers = firewall_parser.add_subparsers(dest='firewall_subcommand', help='Firewall management commands')
+
+# Firewall create subcommand
+firewall_create_parser = firewall_subparsers.add_parser('create', help='Create Azure Firewall with DNAT support (~$900/month)')
+firewall_create_parser.add_argument('name', help='Name for the Azure Firewall')
+firewall_create_parser.add_argument('--vnet', dest='vnet_name', required=True, help='Virtual Network name')
+firewall_create_parser.add_argument('--subnet', dest='subnet_name', default='AzureFirewallSubnet', 
+                                    help='Firewall subnet name (default: AzureFirewallSubnet, must be /26 or larger)')
+firewall_create_parser.add_argument('--public-ip', dest='public_ip_name', required=True, 
+                                    help='Public IP name to assign to firewall')
+
+# Firewall add-rule subcommand
+firewall_add_rule_parser = firewall_subparsers.add_parser('add-rule', help='Add DNAT rule to forward traffic to container')
+firewall_add_rule_parser.add_argument('firewall_name', help='Name of the Azure Firewall')
+firewall_add_rule_parser.add_argument('--rule-name', dest='rule_name', required=True, help='Name for the DNAT rule')
+firewall_add_rule_parser.add_argument('--collection', dest='collection_name', default='default-dnat', 
+                                      help='NAT rule collection name (default: default-dnat)')
+firewall_add_rule_parser.add_argument('--source', dest='source_addresses', action='append', default=['*'],
+                                      help='Source IP addresses (default: ["*"] for any source, can specify multiple times)')
+firewall_add_rule_parser.add_argument('--dest-ip', dest='destination_address', required=True,
+                                      help='Firewall public IP address (destination)')
+firewall_add_rule_parser.add_argument('--dest-port', dest='destination_port', required=True,
+                                      help='Destination port on firewall')
+firewall_add_rule_parser.add_argument('--target-ip', dest='translated_address', required=True,
+                                      help='Container private IP address (target)')
+firewall_add_rule_parser.add_argument('--target-port', dest='translated_port', required=True,
+                                      help='Container port (target)')
+firewall_add_rule_parser.add_argument('--protocol', dest='protocol', choices=['TCP', 'UDP', 'Any'], default='TCP',
+                                      help='Protocol (TCP, UDP, or Any)')
+
+# Firewall delete-rule subcommand
+firewall_delete_rule_parser = firewall_subparsers.add_parser('delete-rule', help='Delete DNAT rule from firewall')
+firewall_delete_rule_parser.add_argument('firewall_name', help='Name of the Azure Firewall')
+firewall_delete_rule_parser.add_argument('--rule-name', dest='rule_name', required=True, help='Name of the DNAT rule to delete')
+firewall_delete_rule_parser.add_argument('--collection', dest='collection_name', default='default-dnat',
+                                         help='NAT rule collection name (default: default-dnat)')
+
+# Firewall ls subcommand
+firewall_ls_parser = firewall_subparsers.add_parser('ls', help='List all Azure Firewalls')
+
+# Firewall rm subcommand
+firewall_rm_parser = firewall_subparsers.add_parser('rm', help='Remove Azure Firewall')
+firewall_rm_parser.add_argument('name', help='Name of the Azure Firewall to remove')
 
 # Select subcommand
 select_parser = subparsers.add_parser('select', help='Select instances by name/regex')
@@ -384,6 +433,21 @@ if args.subcommand == 'ip':
         elif args.ip_subcommand == 'clean':
             args.clean_ip = True
 
+# Handle firewall subcommand (Azure Firewall - Solution 4)
+if args.subcommand == 'firewall':
+    if hasattr(args, 'firewall_subcommand') and args.firewall_subcommand:
+        if args.firewall_subcommand == 'create':
+            args.create_firewall = True
+            args.firewall_name = args.name
+        elif args.firewall_subcommand == 'ls':
+            args.list_firewalls = True
+        elif args.firewall_subcommand == 'rm':
+            args.remove_firewall = args.name
+        elif args.firewall_subcommand == 'add-rule':
+            args.add_firewall_rule = True
+        elif args.firewall_subcommand == 'delete-rule':
+            args.delete_firewall_rule = True
+
 instances_outputs = {}
 
 def build_output(result):
@@ -408,7 +472,20 @@ class Acido(object):
         self.user_assigned = {}
         self.rg = None
         
-        # NEW: Network configuration using subnet delegation instead of NetworkProfile
+        # Network configuration - separated into egress and ingress
+        # Egress (NAT Gateway) - for fleet operations
+        self.egress_public_ip_name = None
+        self.egress_public_ip_id = None
+        self.egress_vnet_name = None
+        self.egress_subnet_name = None
+        
+        # Ingress (Firewall) - for run operations with firewall
+        self.firewall_name = None
+        self.firewall_public_ip = None
+        self.ingress_vnet_name = None
+        self.ingress_subnet_name = None
+        
+        # Legacy fields for backward compatibility
         self.public_ip_name = None
         self.public_ip_id = None
         self.vnet_name = None
@@ -497,6 +574,10 @@ class Acido(object):
         self.all_instances, self.instances_named = self.ls(interactive=False)
 
         self.network_manager = NetworkManager(resource_group=self.rg)
+        
+        # Initialize FirewallManager for Azure Firewall (Solution 4)
+        from acido.azure_utils.FirewallManager import FirewallManager
+        self.firewall_manager = FirewallManager(resource_group=self.rg)
 
         if args.create_ip:
             public_ip_name = args.create_ip
@@ -520,7 +601,17 @@ class Acido(object):
             'image_registry_server': self.image_registry_server,
             'storage_account': self.storage_account,
             'user_assigned_id': self.user_assigned,
-            # NEW: Store network configuration
+            # Egress (NAT Gateway) configuration - for fleet operations
+            'egress_public_ip_name': self.egress_public_ip_name,
+            'egress_public_ip_id': self.egress_public_ip_id,
+            'egress_vnet_name': self.egress_vnet_name,
+            'egress_subnet_name': self.egress_subnet_name,
+            # Ingress (Firewall) configuration - for run operations
+            'firewall_name': self.firewall_name,
+            'firewall_public_ip': self.firewall_public_ip,
+            'ingress_vnet_name': self.ingress_vnet_name,
+            'ingress_subnet_name': self.ingress_subnet_name,
+            # Legacy fields for backward compatibility
             'public_ip_name': self.public_ip_name,
             'public_ip_id': self.public_ip_id,
             'vnet_name': self.vnet_name,
@@ -580,7 +671,13 @@ class Acido(object):
             self.network_manager.create_virtual_network(vnet_name)
             subnet = self.network_manager.create_subnet(vnet_name, subnet_name, public_ip_id=pip_id, subnet_cidr="10.0.1.0/24")
 
-            # 3) Save config (names + IDs)
+            # 3) Save config for egress (NAT Gateway) - used by fleet
+            self.egress_public_ip_name = public_ip_name
+            self.egress_public_ip_id = pip_id
+            self.egress_vnet_name = vnet_name
+            self.egress_subnet_name = subnet_name
+            
+            # Also save to legacy fields for backward compatibility
             self.public_ip_name = public_ip_name
             self.public_ip_id = pip_id
             self.vnet_name = vnet_name
@@ -588,7 +685,7 @@ class Acido(object):
             self.subnet_id = subnet.id
 
             self._save_config()
-            print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
+            print(good(f"Egress network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (NAT Gateway for fleet)"))
         else:
             # Standalone IP - no NAT stack, clear any vnet/subnet config
             self.public_ip_name = public_ip_name
@@ -736,6 +833,315 @@ class Acido(object):
         
         self._save_config()
         print(good("IP configuration cleaned from local config"))
+    
+    def ensure_ingress_subnet(self, vnet_name, subnet_name="container-subnet"):
+        """
+        Ensure a delegated subnet exists for container instances (ingress with firewall).
+        Creates the subnet if it doesn't exist.
+        
+        Args:
+            vnet_name (str): Virtual Network name
+            subnet_name (str): Subnet name (default: container-subnet)
+            
+        Returns:
+            Subnet: Subnet resource
+        """
+        try:
+            # Try to get existing subnet
+            subnet = self.network_manager._client.subnets.get(
+                self.network_manager.resource_group,
+                vnet_name,
+                subnet_name
+            )
+            print(good(f"Using existing subnet: {subnet_name}"))
+            return subnet
+        except Exception as e:
+            # Subnet doesn't exist, create it
+            print(info(f"Creating delegated subnet: {subnet_name}"))
+            subnet = self.network_manager.create_delegated_subnet(
+                vnet_name=vnet_name,
+                subnet_name=subnet_name,
+                subnet_cidr="10.0.2.0/24"
+            )
+            return subnet
+
+    # ==================== Azure Firewall Methods (Solution 4) ====================
+    
+    def create_firewall(self, firewall_name, vnet_name, subnet_name, public_ip_name):
+        """
+        Create an Azure Firewall for enterprise port forwarding (Solution 4).
+        Creates full network stack: Public IP, VNet, AzureFirewallSubnet, container subnet, and Firewall.
+        
+        Args:
+            firewall_name (str): Name for the Azure Firewall
+            vnet_name (str): Virtual Network name (will be created if doesn't exist)
+            subnet_name (str): Firewall subnet name (must be "AzureFirewallSubnet")
+            public_ip_name (str): Public IP name (will be created if doesn't exist)
+            
+        Returns:
+            AzureFirewall: Created firewall resource or None on failure
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return None
+        
+        try:
+            print(orange("Creating Azure Firewall (Enterprise Solution 4)"))
+            print(orange("Cost: ~$1.25/hour (~$900/month)"))
+            print(info("This operation may take 5-10 minutes..."))
+            
+            # Step 1: Create Public IP if it doesn't exist
+            print(info(f"Step 1/5: Creating/verifying Public IP: {public_ip_name}"))
+            try:
+                pip = self.network_manager.get_public_ip(public_ip_name)
+                print(good(f"Using existing Public IP: {public_ip_name}"))
+                pip_id = pip.id
+            except Exception:
+                # Public IP doesn't exist, create it
+                pip_id = self.network_manager.create_ipv4(public_ip_name, with_nat_stack=False)
+            
+            # Step 2: Create VNet if it doesn't exist
+            print(info(f"Step 2/5: Creating/verifying Virtual Network: {vnet_name}"))
+            try:
+                vnet = self.network_manager._client.virtual_networks.get(
+                    self.network_manager.resource_group, vnet_name
+                )
+                print(good(f"Using existing VNet: {vnet_name}"))
+            except Exception:
+                # VNet doesn't exist, create it
+                vnet = self.network_manager.create_virtual_network(vnet_name, cidr="10.0.0.0/16")
+            
+            # Step 3: Create AzureFirewallSubnet if it doesn't exist
+            print(info(f"Step 3/5: Creating/verifying Firewall subnet: {subnet_name}"))
+            try:
+                fw_subnet = self.network_manager._client.subnets.get(
+                    self.network_manager.resource_group, vnet_name, subnet_name
+                )
+                print(good(f"Using existing Firewall subnet: {subnet_name}"))
+            except Exception:
+                # Firewall subnet doesn't exist, create it
+                from azure.mgmt.network.models import Subnet
+                fw_subnet = self.network_manager._client.subnets.begin_create_or_update(
+                    self.network_manager.resource_group, vnet_name, subnet_name,
+                    Subnet(address_prefix="10.0.0.0/26")  # /26 minimum for firewall
+                ).result()
+                print(good(f"Firewall subnet {subnet_name} created"))
+            
+            # Step 4: Create container ingress subnet
+            container_subnet_name = FIREWALL_CONTAINER_SUBNET_NAME
+            print(info(f"Step 4/5: Creating/verifying container subnet: {container_subnet_name}"))
+            self.ensure_ingress_subnet(vnet_name, container_subnet_name)
+            
+            # Step 5: Create the firewall
+            print(info(f"Step 5/5: Creating Azure Firewall: {firewall_name}"))
+            firewall = self.firewall_manager.create_firewall(
+                firewall_name=firewall_name,
+                vnet_name=vnet_name,
+                subnet_name=subnet_name,
+                public_ip_name=public_ip_name
+            )
+            
+            if firewall:
+                # Get the public IP address
+                try:
+                    pip = self.network_manager.get_public_ip(public_ip_name)
+                    firewall_public_ip = pip.ip_address
+                except Exception as e:
+                    print(orange(f"Warning: Could not retrieve firewall public IP: {e}"))
+                    firewall_public_ip = None
+                
+                # Save firewall configuration
+                self.firewall_name = firewall_name
+                self.firewall_public_ip = firewall_public_ip
+                self.ingress_vnet_name = vnet_name
+                self.ingress_subnet_name = container_subnet_name  # Use container subnet, not firewall subnet
+                self._save_config()
+                
+                print(good(f"Firewall configuration saved to config"))
+                if firewall_public_ip:
+                    print(good(f"Firewall public IP: {firewall_public_ip}"))
+                print(good(f"Container subnet for ingress: {container_subnet_name}"))
+            
+            return firewall
+        except Exception as e:
+            print(bad(f"Failed to create firewall: {str(e)}"))
+            return None
+    
+    def add_firewall_rule(self, firewall_name, rule_name, collection_name, 
+                         source_addresses, destination_address, destination_port,
+                         translated_address, translated_port, protocol):
+        """
+        Add a DNAT rule to forward traffic from firewall to container.
+        
+        Args:
+            firewall_name (str): Name of the Azure Firewall
+            rule_name (str): Name for the DNAT rule
+            collection_name (str): NAT rule collection name
+            source_addresses (list): List of source IP addresses
+            destination_address (str): Firewall public IP address
+            destination_port (str): Destination port on firewall
+            translated_address (str): Container private IP address
+            translated_port (str): Container port
+            protocol (str): Protocol (TCP, UDP, or Any)
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            self.firewall_manager.create_dnat_rule(
+                firewall_name=firewall_name,
+                rule_collection_name=collection_name,
+                rule_name=rule_name,
+                source_addresses=source_addresses,
+                destination_address=destination_address,
+                destination_port=destination_port,
+                translated_address=translated_address,
+                translated_port=translated_port,
+                protocol=protocol
+            )
+            return True
+        except Exception as e:
+            print(bad(f"Failed to add DNAT rule: {str(e)}"))
+            return False
+    
+    def delete_firewall_rule(self, firewall_name, collection_name, rule_name):
+        """
+        Delete a DNAT rule from firewall.
+        
+        Args:
+            firewall_name (str): Name of the Azure Firewall
+            collection_name (str): NAT rule collection name
+            rule_name (str): Name of the DNAT rule to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            return self.firewall_manager.delete_dnat_rule(
+                firewall_name=firewall_name,
+                rule_collection_name=collection_name,
+                rule_name=rule_name
+            )
+        except Exception as e:
+            print(bad(f"Failed to delete DNAT rule: {str(e)}"))
+            return False
+    
+    def list_firewalls(self):
+        """
+        List all Azure Firewalls in the resource group.
+        
+        Returns:
+            list: List of firewall information dicts
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return []
+        
+        try:
+            firewalls = self.firewall_manager.list_firewalls()
+            
+            if not firewalls:
+                print(info("No Azure Firewalls found."))
+                return []
+            
+            print(good("Azure Firewalls:"))
+            for fw in firewalls:
+                print(f"  {bold(fw['name'])} ({fw['sku_tier']})")
+                print(f"    Public IP: {green(fw['public_ip'])}")
+                print(f"    DNAT Rules: {fw['dnat_rules']}")
+                print(f"    Status: {fw['provisioning_state']}")
+                print(f"    Location: {fw['location']}")
+                print(f"    Cost: {orange('~$1.25/hour (~$900/month)')}")
+            
+            return firewalls
+        except Exception as e:
+            print(bad(f"Failed to list firewalls: {str(e)}"))
+            return []
+    
+    def delete_firewall(self, firewall_name):
+        """
+        Delete an Azure Firewall and its associated network infrastructure.
+        Removes: Firewall, VNet (including all subnets), and clears config.
+        
+        Args:
+            firewall_name (str): Name of the firewall to delete
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        if self.firewall_manager is None:
+            print(bad("Firewall manager is not initialized. Please provide a resource group."))
+            return False
+        
+        try:
+            print(orange(f"Deleting Azure Firewall and network stack '{firewall_name}' (may save ~$900/month)"))
+            
+            # Get firewall details to find associated VNet before deletion
+            try:
+                firewall = self.firewall_manager.get_firewall(firewall_name)
+                if firewall and firewall.ip_configurations:
+                    # Extract VNet name from subnet ID
+                    # Format: /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/virtualNetworks/{vnet}/subnets/{subnet}
+                    subnet_id = firewall.ip_configurations[0].subnet.id
+                    vnet_name = subnet_id.split('/virtualNetworks/')[1].split('/')[0]
+                    print(info(f"Found associated VNet: {vnet_name}"))
+                else:
+                    vnet_name = self.ingress_vnet_name
+                    if vnet_name:
+                        print(info(f"Using VNet from config: {vnet_name}"))
+            except Exception as e:
+                print(orange(f"Could not retrieve VNet from firewall: {e}"))
+                vnet_name = self.ingress_vnet_name
+                if vnet_name:
+                    print(info(f"Using VNet from config: {vnet_name}"))
+            
+            # Step 1: Delete the firewall
+            print(info("Step 1/2: Deleting Azure Firewall..."))
+            result = self.firewall_manager.delete_firewall(firewall_name)
+            
+            if not result:
+                print(bad("Failed to delete firewall"))
+                return False
+            
+            # Step 2: Delete VNet (this will delete all subnets within it)
+            if vnet_name:
+                print(info(f"Step 2/2: Deleting VNet '{vnet_name}' and all subnets..."))
+                try:
+                    self.network_manager._client.virtual_networks.begin_delete(
+                        self.network_manager.resource_group,
+                        vnet_name
+                    ).result()
+                    print(good(f"VNet '{vnet_name}' and all subnets deleted"))
+                except Exception as e:
+                    print(orange(f"Warning: Could not delete VNet '{vnet_name}': {e}"))
+                    print(info("VNet may have been manually deleted or doesn't exist"))
+            else:
+                print(info("Step 2/2: No VNet to delete (not found in firewall or config)"))
+            
+            # Clear firewall configuration from config if it matches
+            if self.firewall_name == firewall_name:
+                self.firewall_name = None
+                self.firewall_public_ip = None
+                self.ingress_vnet_name = None
+                self.ingress_subnet_name = None
+                self._save_config()
+                print(good("Firewall configuration cleared from config"))
+            
+            print(good(f"Firewall '{firewall_name}' and network stack deleted successfully"))
+            return True
+        except Exception as e:
+            print(bad(f"Failed to delete firewall: {str(e)}"))
+            return False
+
+    # ==================== End of Firewall Methods ====================
 
     def ls(self, interactive=True):
         all_instances = {}
@@ -846,8 +1252,8 @@ class Acido(object):
                             image_name=image_name,
                             input_files=input_files,
                             command=scan_cmd,
-                            vnet_name=self.vnet_name,
-                            subnet_name=self.subnet_name,
+                            vnet_name=self.egress_vnet_name if self.egress_vnet_name else self.vnet_name,
+                            subnet_name=self.egress_subnet_name if self.egress_subnet_name else self.subnet_name,
                             env_vars=env_vars,
                             quiet=quiet,
                             location=selected_region,
@@ -887,8 +1293,8 @@ class Acido(object):
                 image_name=image_name,
                 command=scan_cmd,
                 env_vars=env_vars,
-                vnet_name=self.vnet_name,
-                subnet_name=self.subnet_name,
+                vnet_name=self.egress_vnet_name if self.egress_vnet_name else self.vnet_name,
+                subnet_name=self.egress_subnet_name if self.egress_subnet_name else self.subnet_name,
                 input_files=input_files,
                 quiet=quiet,
                 location=selected_region,
@@ -1053,9 +1459,24 @@ class Acido(object):
         response = {}
         outputs = {}
         
-        # Handle bidirectional connectivity
+        # Determine subnet configuration based on firewall or bidirectional mode
+        use_vnet = None
+        use_subnet = None
         public_ip_id = None
-        if bidirectional:
+        
+        # Check if firewall is configured (ingress mode)
+        if self.firewall_name and self.firewall_public_ip:
+            # Firewall mode: Use ingress subnet, inject firewall IP as env var
+            use_vnet = self.ingress_vnet_name
+            use_subnet = self.ingress_subnet_name
+            env_vars['FIREWALL_PUBLIC_IP'] = self.firewall_public_ip
+            env_vars['FIREWALL_NAME'] = self.firewall_name
+            print_if_not_quiet(good(f"Using firewall ingress: {self.firewall_name}"))
+            print_if_not_quiet(info(f"Firewall public IP injected: {self.firewall_public_ip}"))
+            print_if_not_quiet(info(f"Container will use private IP in subnet: {use_subnet}"))
+            
+        elif bidirectional:
+            # Bidirectional mode: Direct public IP assignment
             if not exposed_ports:
                 print(bad("--bidirectional requires --expose-port to be specified"))
                 raise ValueError("--bidirectional requires --expose-port")
@@ -1072,6 +1493,11 @@ class Acido(object):
             else:
                 print(bad("No public IP selected. Please run 'acido ip select' or 'acido ip create' first"))
                 raise ValueError("No public IP selected for bidirectional mode")
+        
+        else:
+            # Default mode: Use legacy vnet/subnet if available
+            use_vnet = self.vnet_name
+            use_subnet = self.subnet_name
         
         # Deploy the single instance
         print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
@@ -1095,8 +1521,8 @@ class Acido(object):
             image_name=image_name,
             command=command_to_execute,
             env_vars=env_vars,
-            vnet_name=self.vnet_name,
-            subnet_name=self.subnet_name,
+            vnet_name=use_vnet,
+            subnet_name=use_subnet,
             input_files=None,
             quiet=quiet,
             location=selected_region,
@@ -2419,14 +2845,16 @@ def main():
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, getattr(args, 'image_tag', 'latest'))
         
-        # Parse exposed ports if provided
+        # Parse exposed ports if provided (supports single ports and ranges)
         exposed_ports = None
         if hasattr(args, 'expose_ports') and args.expose_ports:
             from acido.utils.port_utils import parse_port_spec
             exposed_ports = []
             for spec in args.expose_ports:
                 try:
-                    exposed_ports.append(parse_port_spec(spec))
+                    # parse_port_spec now returns a list (single port or range)
+                    parsed_ports = parse_port_spec(spec)
+                    exposed_ports.extend(parsed_ports)
                 except ValueError as e:
                     print(bad(str(e)))
                     sys.exit(1)
@@ -2480,6 +2908,38 @@ def main():
     if args.create_ip:
         with_nat_stack = getattr(args, 'with_nat_stack', False)
         acido.create_ipv4_address(args.create_ip, with_nat_stack=with_nat_stack)
+    
+    # Handle firewall commands (Azure Firewall - Solution 4)
+    if hasattr(args, 'create_firewall') and args.create_firewall:
+        acido.create_firewall(
+            firewall_name=args.firewall_name,
+            vnet_name=args.vnet_name,
+            subnet_name=args.subnet_name,
+            public_ip_name=args.public_ip_name
+        )
+    if hasattr(args, 'list_firewalls') and args.list_firewalls:
+        acido.list_firewalls()
+    if hasattr(args, 'remove_firewall') and args.remove_firewall:
+        acido.delete_firewall(args.remove_firewall)
+    if hasattr(args, 'add_firewall_rule') and args.add_firewall_rule:
+        acido.add_firewall_rule(
+            firewall_name=args.firewall_name,
+            rule_name=args.rule_name,
+            collection_name=args.collection_name,
+            source_addresses=args.source_addresses,
+            destination_address=args.destination_address,
+            destination_port=args.destination_port,
+            translated_address=args.translated_address,
+            translated_port=args.translated_port,
+            protocol=args.protocol
+        )
+    if hasattr(args, 'delete_firewall_rule') and args.delete_firewall_rule:
+        acido.delete_firewall_rule(
+            firewall_name=args.firewall_name,
+            collection_name=args.collection_name,
+            rule_name=args.rule_name
+        )
+    
     if args.create_image:
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)

@@ -250,6 +250,8 @@ Acido supports bidirectional connectivity for containers that need to accept inb
 - **Public IP assignment**: Bidirectional containers get a dedicated public IP for inbound traffic
 - **Fleet unchanged**: `acido fleet` always uses NAT Gateway (no bidirectional support)
 
+**💼 Enterprise Option**: For advanced security and centralized control, see [Azure Firewall Integration](docs/AZURE_FIREWALL.md) (Solution 4 - ~$900/month)
+
 **Examples:**
 
 ```bash
@@ -295,7 +297,8 @@ acido fleet scan -n 10 -im nmap \
 **Important Notes:**
 - The `--bidirectional` flag is **only available** for `acido run` (single containers)
 - `acido fleet` does NOT support `--bidirectional` (fleet always uses NAT Gateway for egress)
-- The `--expose-port` format is `PORT:PROTOCOL` (e.g., `5060:udp`, `8080:tcp`)
+- The `--expose-port` format is `PORT:PROTOCOL` or `PORT_START-PORT_END:PROTOCOL` (e.g., `5060:udp`, `8080:tcp`, `10000-10099:udp` for ranges)
+- Port ranges are expanded automatically (max 100 ports per range)
 - Multiple ports can be exposed by repeating `--expose-port`
 - Container IP is printed after deployment for easy access
 - Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)

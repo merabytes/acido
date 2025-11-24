@@ -102,24 +102,40 @@ class NetworkManager(ManagedIdentity):
         ).result()
         print(good(f"Subnet {subnet.id} created successfully."))
         return subnet
+    
+    def create_delegated_subnet(self, vnet_name, subnet_name, subnet_cidr="10.0.2.0/24"):
+        """
+        Create a delegated subnet for container instances without NAT Gateway.
+        Used for firewall ingress scenarios where containers use private IPs.
+        
+        Args:
+            vnet_name (str): Virtual Network name
+            subnet_name (str): Subnet name
+            subnet_cidr (str): CIDR block for subnet (default: 10.0.2.0/24)
+        
+        Returns:
+            Subnet: Created subnet resource
+        """
+        subnet = self._client.subnets.begin_create_or_update(
+            self.resource_group, vnet_name, subnet_name,
+            Subnet(
+                address_prefix=subnet_cidr,
+                delegations=[Delegation(
+                    name='containerInstanceDelegation',
+                    service_name='Microsoft.ContainerInstance/containerGroups'
+                )]
+            )
+        ).result()
+        print(good(f"Delegated subnet {subnet.id} created successfully (no NAT Gateway)."))
+        return subnet
 
     def delete_stack(self, public_ip_name, vnet_name, subnet_name):
         """
         Delete in order: NAT GW -> Subnet -> VNet -> Public IP.
         (Requires that no container groups are using the subnet).
+        NAT Gateway must be deleted before subnet since it's attached to it.
         """
-        # Subnet
-        try:
-            print(good(f"Deleting Subnet: {subnet_name}..."))
-            self._client.subnets.begin_delete(
-                self.resource_group, vnet_name, subnet_name
-            ).result()
-            print(good(f"Subnet {subnet_name} deleted successfully."))
-        except Exception as e:
-            print(good(f"Subnet {subnet_name} not found or already deleted."))
-        
-
-        # NAT Gateway
+        # NAT Gateway (delete first - it's attached to the subnet)
         nat_gw_name = f'{subnet_name}-nat-gw'
         try:
             print(good(f"Deleting NAT Gateway: {nat_gw_name}..."))
@@ -129,6 +145,16 @@ class NetworkManager(ManagedIdentity):
             print(good(f"NAT Gateway {nat_gw_name} deleted successfully."))
         except Exception as e:
             print(good(f"NAT Gateway {nat_gw_name} not found or already deleted."))
+        
+        # Subnet (delete after NAT GW is removed)
+        try:
+            print(good(f"Deleting Subnet: {subnet_name}..."))
+            self._client.subnets.begin_delete(
+                self.resource_group, vnet_name, subnet_name
+            ).result()
+            print(good(f"Subnet {subnet_name} deleted successfully."))
+        except Exception as e:
+            print(good(f"Subnet {subnet_name} not found or already deleted."))
         
         # VNet
         try:

@@ -2,20 +2,24 @@
 
 def parse_port_spec(port_spec):
     """
-    Parse port specification string.
+    Parse port specification string, including support for port ranges.
     
     Args:
-        port_spec (str): String like "5060:udp" or "8080:tcp"
+        port_spec (str): String like "5060:udp", "8080:tcp", or "5060-5070:udp" (range)
     
     Returns:
-        dict: {"port": 5060, "protocol": "UDP"}
+        list: List of dicts with {"port": 5060, "protocol": "UDP"}
+              For single port: [{"port": 5060, "protocol": "UDP"}]
+              For range: [{"port": 5060, "protocol": "UDP"}, {"port": 5061, "protocol": "UDP"}, ...]
         
     Raises:
         ValueError: If port_spec is invalid
     
     Example:
         >>> parse_port_spec("5060:udp")
-        {"port": 5060, "protocol": "UDP"}
+        [{"port": 5060, "protocol": "UDP"}]
+        >>> parse_port_spec("5060-5062:udp")
+        [{"port": 5060, "protocol": "UDP"}, {"port": 5061, "protocol": "UDP"}, {"port": 5062, "protocol": "UDP"}]
     """
     try:
         # Use maxsplit=1 to handle cases where protocol might contain colons
@@ -23,29 +27,65 @@ def parse_port_spec(port_spec):
         if len(parts) != 2:
             raise ValueError("Missing port or protocol")
         
-        port, protocol = parts
-        port_num = int(port)
+        port_part, protocol = parts
         protocol_upper = protocol.upper()
         
-        # Validate port and protocol
-        validate_port(port_num)
+        # Validate protocol first
         validate_protocol(protocol_upper)
         
-        return {
-            "port": port_num,
-            "protocol": protocol_upper
-        }
+        # Check if it's a port range (contains hyphen)
+        if '-' in port_part:
+            # Parse port range
+            range_parts = port_part.split('-', maxsplit=1)
+            if len(range_parts) != 2:
+                raise ValueError("Invalid port range format")
+            
+            start_port = int(range_parts[0])
+            end_port = int(range_parts[1])
+            
+            # Validate both ports
+            validate_port(start_port)
+            validate_port(end_port)
+            
+            # Ensure start < end
+            if start_port >= end_port:
+                raise ValueError(f"Invalid port range: start port ({start_port}) must be less than end port ({end_port})")
+            
+            # Limit range size to prevent excessive rules
+            range_size = end_port - start_port + 1
+            if range_size > 100:
+                raise ValueError(f"Port range too large ({range_size} ports). Maximum allowed is 100 ports.")
+            
+            # Generate list of ports in range
+            result = []
+            for port in range(start_port, end_port + 1):
+                result.append({
+                    "port": port,
+                    "protocol": protocol_upper
+                })
+            return result
+        else:
+            # Single port
+            port_num = int(port_part)
+            validate_port(port_num)
+            
+            return [{
+                "port": port_num,
+                "protocol": protocol_upper
+            }]
     except ValueError as e:
         # Preserve original error details while providing helpful message
         raise ValueError(
             f"Invalid port specification: {port_spec}. "
-            f"Format should be PORT:PROTOCOL (e.g., 5060:udp). "
+            f"Format should be PORT:PROTOCOL or PORT_START-PORT_END:PROTOCOL "
+            f"(e.g., 5060:udp or 5060-5070:udp). "
             f"Original error: {str(e)}"
         ) from e
     except IndexError as e:
         raise ValueError(
             f"Invalid port specification: {port_spec}. "
-            f"Format should be PORT:PROTOCOL (e.g., 5060:udp). "
+            f"Format should be PORT:PROTOCOL or PORT_START-PORT_END:PROTOCOL "
+            f"(e.g., 5060:udp or 5060-5070:udp). "
             f"Original error: {str(e)}"
         ) from e
 
