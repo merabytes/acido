@@ -19,6 +19,7 @@ Deploy an Asterisk VoIP server that can:
 
 ```bash
 # 1. Create public IP for VoIP server
+# This automatically creates the network stack: asterisk-ip, asterisk-ip-vnet, asterisk-ip-subnet
 acido ip create-forwarding asterisk-ip \
   --ports 5060:udp \
   --ports 5060:tcp \
@@ -28,6 +29,8 @@ acido ip create-forwarding asterisk-ip \
 acido create asterisk --image asterisk:latest
 
 # 3. Deploy Asterisk with port forwarding
+# Note: Subnet configuration is automatically derived from --public-ip parameter
+# No need to run 'acido ip select' or read from config!
 acido run asterisk-prod \
   -im asterisk \
   -t "./start-asterisk.sh" \
@@ -37,12 +40,44 @@ acido run asterisk-prod \
   --expose-port 5061:tcp \
   -d 86400  # 24 hours
 
+# The command automatically uses:
+#   - VNet: asterisk-ip-vnet
+#   - Subnet: asterisk-ip-subnet
+# (derived from public IP name 'asterisk-ip')
+
 # 4. Get the public IP address
 acido ip ls
 # Output: asterisk-ip (203.0.113.45) [Ports: 5060/UDP, 5060/TCP, 5061/TCP]
 
 # 5. Configure SIP trunk with IP 203.0.113.45:5060
 # Now external providers can send SIP INVITE to your server!
+
+# 6. Clean up when done
+acido rm asterisk-prod
+acido ip rm asterisk-ip  # Removes IP, VNet, subnet, and NAT gateway
+```
+
+### Important Notes
+
+**Automatic Network Configuration:**
+- When you specify `--public-ip asterisk-ip`, the system automatically derives:
+  - VNet name: `asterisk-ip-vnet`
+  - Subnet name: `asterisk-ip-subnet`
+- No need to manually select IP or read from config file!
+
+**Config Warnings:**
+If you have an IP selected in your config (via `acido ip select`) but don't specify `--public-ip`, you'll see:
+```
+Warning: IP 'old-ip' is selected in config but --public-ip not specified
+The container will use NAT Gateway for egress only (no port forwarding)
+To use port forwarding: add --public-ip old-ip
+To clear config: run 'acido ip clean'
+```
+
+**Cleaning Config:**
+```bash
+# Remove stored IP configuration from local config
+acido ip clean
 ```
 
 ### Docker Image Example

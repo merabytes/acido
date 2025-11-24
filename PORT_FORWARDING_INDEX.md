@@ -90,9 +90,11 @@
 **How**:
 ```bash
 # 1. Create public IP for port forwarding
+# This also creates voip-ip-vnet and voip-ip-subnet automatically
 acido ip create-forwarding voip-ip --ports 5060:udp --ports 5060:tcp
 
 # 2. Deploy container with port forwarding
+# Network config (VNet/subnet) automatically derived from --public-ip
 acido run voip-server \
   -im asterisk:latest \
   -t "./start-asterisk.sh" \
@@ -101,8 +103,21 @@ acido run voip-server \
   --expose-port 5060:tcp \
   -d 86400
 
+# Automatically uses:
+#   VNet: voip-ip-vnet
+#   Subnet: voip-ip-subnet
+
 # 3. Now your VoIP server can receive inbound SIP calls! ✅
+
+# 4. Clean config when needed
+acido ip clean  # Clears IP selection from config
 ```
+
+**Key Features**:
+- ✅ **Automatic subnet derivation**: No need to run `acido ip select` or read from config
+- ✅ **Config warnings**: Alerts if IP is in config but not used
+- ✅ **Clean command**: `acido ip clean` to clear old config
+- ✅ **Works for fleet too**: `acido fleet --public-ip <name>` for network config
 
 ---
 

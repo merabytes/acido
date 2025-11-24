@@ -318,11 +318,18 @@ ip_ls_forwarding_parser = ip_subparsers.add_parser(
     help='List public IPs configured for port forwarding'
 )
 
+# IP clean subcommand (NEW)
+ip_clean_parser = ip_subparsers.add_parser(
+    'clean',
+    help='Clean IP configuration from local config (removes selected IP from config)'
+)
+
 # Add port forwarding options to run command (around line 115)
 run_parser.add_argument(
     '--public-ip',
     dest='public_ip_name',
-    help='Name of public IP to use for port forwarding'
+    help='Name of public IP to use for port forwarding. '
+         'Subnet configuration will be automatically derived from IP name.'
 )
 run_parser.add_argument(
     '--expose-port',
@@ -332,8 +339,14 @@ run_parser.add_argument(
          'Can be specified multiple times. Requires --public-ip.'
 )
 
-# Add similar arguments to fleet_parser if needed for multi-instance scenarios
-# (Note: Port forwarding is primarily for single instances via 'run' command)
+# Add similar arguments to fleet_parser for multi-instance scenarios
+fleet_parser.add_argument(
+    '--public-ip',
+    dest='public_ip_name',
+    help='Name of public IP to use for port forwarding. '
+         'Subnet configuration will be automatically derived from IP name. '
+         'All instances in fleet will share the same network configuration.'
+)
 ```
 
 Add handler methods in the Acido class:
@@ -409,6 +422,48 @@ class Acido(ManagedIdentity):
             print(good(f"Removed forwarding IP: {name}"))
         else:
             print(bad(f"Failed to remove forwarding IP: {name}"))
+    
+    def clean_ip_config(self):
+        """
+        Clean IP configuration from local config.
+        Removes selected IP, vnet, and subnet from config file.
+        
+        Example:
+            >>> acido = Acido(resource_group="my-rg")
+            >>> acido.clean_ip_config()
+            # Clears: public_ip_name, public_ip_id, vnet_name, subnet_name, subnet_id
+        """
+        self.public_ip_name = None
+        self.public_ip_id = None
+        self.vnet_name = None
+        self.subnet_name = None
+        self.subnet_id = None
+        
+        self._save_config()
+        print(good("IP configuration cleaned from local config"))
+    
+    def _derive_subnet_from_public_ip(self, public_ip_name):
+        """
+        Automatically derive subnet configuration from public IP name.
+        
+        Uses naming convention:
+        - VNet: {public_ip_name}-vnet
+        - Subnet: {public_ip_name}-subnet
+        
+        Args:
+            public_ip_name (str): Name of the public IP
+        
+        Returns:
+            tuple: (vnet_name, subnet_name)
+        
+        Example:
+            >>> vnet, subnet = acido._derive_subnet_from_public_ip("voip-ip")
+            >>> print(vnet, subnet)
+            voip-ip-vnet voip-ip-subnet
+        """
+        vnet_name = f"{public_ip_name}-vnet"
+        subnet_name = f"{public_ip_name}-subnet"
+        return vnet_name, subnet_name
 ```
 
 Update the main argument handler:
@@ -422,10 +477,19 @@ if args.subcommand == 'ip':
         acido.create_forwarding_ip(args.name, args.forward_ports)
     elif args.ip_subcommand == 'ls-forwarding':
         acido.list_forwarding_ips()
+    elif args.ip_subcommand == 'clean':
+        acido.clean_ip_config()
     # ... existing IP subcommands ...
 
 # Handle run command with port forwarding
 elif args.subcommand == 'run':
+    # Warn if IP is selected in config but --public-ip is not specified
+    if acido.public_ip_name and not args.public_ip_name:
+        print(orange(f"Warning: IP '{acido.public_ip_name}' is selected in config but --public-ip not specified"))
+        print(info("The container will use NAT Gateway for egress only (no port forwarding)"))
+        print(info(f"To use port forwarding: add --public-ip {acido.public_ip_name}"))
+        print(info("To clear config: run 'acido ip clean'"))
+    
     # Parse exposed ports if provided
     exposed_ports = None
     if args.expose_ports:
@@ -446,6 +510,13 @@ elif args.subcommand == 'run':
         print(bad("--expose-port requires --public-ip to be specified"))
         sys.exit(1)
     
+    # Automatically derive subnet from public IP if specified
+    vnet_name = None
+    subnet_name = None
+    if args.public_ip_name:
+        vnet_name, subnet_name = acido._derive_subnet_from_public_ip(args.public_ip_name)
+        print(info(f"Using network: {vnet_name}/{subnet_name} (derived from {args.public_ip_name})"))
+    
     # Call run with port forwarding parameters
     acido.run(
         name=args.name,
@@ -458,7 +529,42 @@ elif args.subcommand == 'run':
         cleanup=not args.no_cleanup,
         regions=args.region,
         public_ip_name=args.public_ip_name,  # New parameter
-        exposed_ports=exposed_ports  # New parameter
+        exposed_ports=exposed_ports,  # New parameter
+        vnet_name=vnet_name,  # Automatically derived
+        subnet_name=subnet_name  # Automatically derived
+    )
+
+# Handle fleet command with port forwarding
+elif args.subcommand == 'fleet':
+    # Warn if IP is selected in config but --public-ip is not specified
+    if acido.public_ip_name and not args.public_ip_name:
+        print(orange(f"Warning: IP '{acido.public_ip_name}' is selected in config but --public-ip not specified"))
+        print(info("The fleet will use NAT Gateway for egress only (no port forwarding)"))
+        print(info(f"To use network configuration: add --public-ip {acido.public_ip_name}"))
+        print(info("To clear config: run 'acido ip clean'"))
+    
+    # Automatically derive subnet from public IP if specified
+    vnet_name = None
+    subnet_name = None
+    if args.public_ip_name:
+        vnet_name, subnet_name = acido._derive_subnet_from_public_ip(args.public_ip_name)
+        print(info(f"Using network: {vnet_name}/{subnet_name} (derived from {args.public_ip_name})"))
+    
+    # Call fleet with network parameters
+    acido.fleet(
+        fleet_name=args.fleet_name,
+        instance_num=args.num_instances,
+        image_name=args.image_name,
+        scan_cmd=args.task,
+        input_file=args.input_file,
+        wait=args.wait,
+        write_to_file=args.write_to_file,
+        output_format=args.output_format,
+        quiet=args.quiet,
+        rm_when_done=args.rm_when_done,
+        regions=args.region,
+        vnet_name=vnet_name,  # Automatically derived
+        subnet_name=subnet_name  # Automatically derived
     )
 ```
 
@@ -468,14 +574,26 @@ Update the `run()` method signature:
 def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
         write_to_file: str = None, output_format: str = 'txt', 
         quiet: bool = False, cleanup: bool = True, regions=None,
-        public_ip_name: str = None, exposed_ports: list = None):
+        public_ip_name: str = None, exposed_ports: list = None,
+        vnet_name: str = None, subnet_name: str = None):
     """
     Run a single ephemeral container instance.
     
     New Args:
         public_ip_name (str, optional): Name of public IP for port forwarding
         exposed_ports (list, optional): List of port dicts to expose
+        vnet_name (str, optional): VNet name (auto-derived from public_ip if not provided)
+        subnet_name (str, optional): Subnet name (auto-derived from public_ip if not provided)
+    
+    Note:
+        When public_ip_name is specified, vnet_name and subnet_name are automatically
+        derived using the naming convention: {public_ip_name}-vnet and {public_ip_name}-subnet.
+        This eliminates the need to read subnet configuration from config file.
     """
+    # Automatically derive subnet from public IP if not explicitly provided
+    if public_ip_name and not vnet_name:
+        vnet_name, subnet_name = self._derive_subnet_from_public_ip(public_ip_name)
+    
     # ... existing code ...
     
     # Pass to instance_manager.deploy()
@@ -504,13 +622,23 @@ Update operation handling:
 VALID_OPERATIONS = [
     'fleet', 'run', 'ls', 'rm', 
     'ip_create', 'ip_ls', 'ip_rm',
-    'ip_create_forwarding', 'ip_ls_forwarding'  # New operations
+    'ip_create_forwarding', 'ip_ls_forwarding', 'ip_clean'  # New operations
 ]
 
 def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None,
                  public_ip_name=None, exposed_ports=None):
-    """Execute run operation with optional port forwarding."""
+    """
+    Execute run operation with optional port forwarding.
+    
+    Subnet configuration is automatically derived from public_ip_name.
+    """
     full_image_url = acido.build_image_url(image_name)
+    
+    # Automatically derive subnet from public IP
+    vnet_name = None
+    subnet_name = None
+    if public_ip_name:
+        vnet_name, subnet_name = acido._derive_subnet_from_public_ip(public_ip_name)
     
     return acido.run(
         name=name,
@@ -522,8 +650,10 @@ def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None,
         quiet=True,
         cleanup=cleanup,
         regions=regions,
-        public_ip_name=public_ip_name,  # New parameter
-        exposed_ports=exposed_ports  # New parameter
+        public_ip_name=public_ip_name,
+        exposed_ports=exposed_ports,
+        vnet_name=vnet_name,  # Automatically derived
+        subnet_name=subnet_name  # Automatically derived
     )
 
 # In lambda_handler function
@@ -550,6 +680,14 @@ def lambda_handler(event, context):
         return build_response({
             'operation': operation,
             'result': {'ips': ips}
+        })
+    
+    elif operation == 'ip_clean':
+        # Clean IP configuration
+        acido.clean_ip_config()
+        return build_response({
+            'operation': operation,
+            'result': {'message': 'IP configuration cleaned'}
         })
     
     elif operation == 'run':

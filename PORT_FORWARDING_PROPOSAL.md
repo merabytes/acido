@@ -131,14 +131,44 @@ Regular Containers:
 
 2. **Modified Container Deployment**: Add optional `--public-ip` flag
    ```bash
+   # Subnet configuration automatically derived from public IP name
    acido run voip-server \
      -im asterisk:latest \
      -t "./start-asterisk.sh" \
      --public-ip voip-ip \
-     --ports 5060:udp,5060:tcp
+     --expose-port 5060:udp \
+     --expose-port 5060:tcp
+   
+   # Automatically uses:
+   #   VNet: voip-ip-vnet
+   #   Subnet: voip-ip-subnet
    ```
 
-3. **New NetworkManager Methods**:
+3. **New IP Management Commands**:
+   ```bash
+   acido ip clean  # Clean IP configuration from local config
+   acido ip ls-forwarding  # List port-forwarding enabled IPs
+   ```
+
+4. **Automatic Subnet Derivation**:
+   When `--public-ip` is specified, the system automatically derives network configuration:
+   - VNet: `{public_ip_name}-vnet`
+   - Subnet: `{public_ip_name}-subnet`
+   
+   This eliminates the need to:
+   - Run `acido ip select` 
+   - Read subnet configuration from config file
+   - Manually specify VNet/subnet parameters
+
+5. **Config Warning System**:
+   If an IP is selected in config but `--public-ip` is not specified, a warning is displayed:
+   ```
+   Warning: IP 'old-ip' is selected in config but --public-ip not specified
+   To use port forwarding: add --public-ip old-ip
+   To clear config: run 'acido ip clean'
+   ```
+
+6. **New NetworkManager Methods**:
    ```python
    def create_public_ip_with_ports(self, name, ports):
        """

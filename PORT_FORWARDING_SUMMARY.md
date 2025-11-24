@@ -58,10 +58,11 @@ Assign dedicated Azure public IP addresses to containers that require inbound co
 
 ### VoIP/SIP Server
 ```bash
-# Create public IP
+# Create public IP (automatically creates voip-ip-vnet and voip-ip-subnet)
 acido ip create-forwarding voip-ip --ports 5060:udp --ports 5060:tcp
 
 # Deploy Asterisk server
+# Network config automatically derived from --public-ip
 acido run asterisk-prod \
   -im asterisk:latest \
   -t "./start-asterisk.sh" \
@@ -71,6 +72,7 @@ acido run asterisk-prod \
   -d 86400
 
 # Result: SIP providers can now send INVITE to your server!
+# Uses VNet: voip-ip-vnet, Subnet: voip-ip-subnet (auto-derived)
 ```
 
 ### Game Server
@@ -78,7 +80,7 @@ acido run asterisk-prod \
 # Create IP for Minecraft
 acido ip create-forwarding minecraft-ip --ports 25565:tcp
 
-# Deploy server
+# Deploy server (subnet auto-derived from minecraft-ip)
 acido run minecraft-server \
   -im minecraft:latest \
   --public-ip minecraft-ip \
@@ -86,6 +88,14 @@ acido run minecraft-server \
   -d 28800
 
 # Players connect to: <public-ip>:25565
+```
+
+### Clean Config
+```bash
+# If you have an old IP in config, clean it:
+acido ip clean
+
+# This clears: public_ip_name, public_ip_id, vnet_name, subnet_name, subnet_id
 ```
 
 ### Lambda Invocation
@@ -112,12 +122,24 @@ acido run minecraft-server \
 1. New CLI commands:
    - `acido ip create-forwarding <name> --ports PORT:PROTOCOL`
    - `acido ip ls-forwarding`
+   - `acido ip clean` (clean IP config from local config)
    - `acido run --public-ip <name> --expose-port PORT:PROTOCOL`
+   - `acido fleet --public-ip <name>` (for network configuration)
 
-2. Code changes:
+2. Automatic subnet derivation:
+   - When `--public-ip` is specified, automatically derive VNet/subnet
+   - VNet: `{public_ip_name}-vnet`
+   - Subnet: `{public_ip_name}-subnet`
+   - No need to run `acido ip select` or read from config
+
+3. Config warning system:
+   - Warn if IP is in config but `--public-ip` not specified
+   - Suggest using `acido ip clean` to clear old config
+
+4. Code changes:
    - **NetworkManager.py**: Add `create_forwarding_ip()`, `list_forwarding_ips()`
    - **InstanceManager.py**: Modify `deploy()` to accept `public_ip_name` and `exposed_ports`
-   - **cli.py**: Add new commands and arguments
+   - **cli.py**: Add new commands, automatic subnet derivation, config warnings
    - **lambda_handler.py**: Support new operations
    - **port_utils.py**: Port parsing and validation utilities
 
