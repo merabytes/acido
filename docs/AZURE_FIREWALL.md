@@ -1,0 +1,361 @@
+# Azure Firewall Integration (Solution 4 - Enterprise)
+
+This document describes how to use Azure Firewall with DNAT (Destination NAT) for enterprise-grade port forwarding to Azure Container Instances.
+
+## ⚠️ Important: Cost Warning
+
+**Azure Firewall is an ENTERPRISE solution with significant costs:**
+- **~$1.25/hour (~$900/month)** for the firewall itself
+- Additional data processing charges
+- Suitable for organizations with enterprise security requirements
+
+**For most use cases**, consider using the `--bidirectional` flag (Solution 1) instead:
+- **~$13/month** per container
+- Direct public IP assignment
+- Simpler setup
+- See [Port Forwarding (Bidirectional Connectivity)](#port-forwarding-bidirectional-connectivity) in README.md
+
+## When to Use Azure Firewall
+
+Use Azure Firewall when you need:
+- ✅ **Enterprise security features**: Threat intelligence, FQDN filtering
+- ✅ **Centralized port forwarding**: Multiple containers behind one firewall
+- ✅ **Advanced network rules**: Complex traffic filtering and routing
+- ✅ **Hub-spoke topology**: Enterprise network architecture
+- ✅ **Compliance requirements**: Regulatory requirements for firewall-based security
+
+## Architecture
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│ Resource Group                                                │
+│                                                               │
+│  ┌──────────────────┐                                        │
+│  │ Public IP        │                                        │
+│  │ (Firewall IP)    │                                        │
+│  │ 20.0.0.1         │                                        │
+│  └────────┬─────────┘                                        │
+│           │                                                   │
+│           ▼                                                   │
+│  ┌──────────────────┐      ┌──────────────────────────────┐ │
+│  │ Azure Firewall   │      │ Virtual Network               │ │
+│  │ (DNAT Rules)     │      │                               │ │
+│  │ - 5060:UDP       │──────┼─────┐                         │ │
+│  │   → 10.0.1.4     │      │     │                         │ │
+│  │ - 8080:TCP       │      │  ┌──▼──────────────────────┐ │ │
+│  │   → 10.0.1.5     │      │  │ AzureFirewallSubnet     │ │ │
+│  └──────────────────┘      │  │ (Firewall subnet)       │ │ │
+│                             │  └─────────────────────────┘ │ │
+│                             │                               │ │
+│                             │  ┌──────────────────────────┐ │ │
+│                             │  │ Delegated Subnet         │ │ │
+│                             │  │                          │ │ │
+│                             │  │  ┌─────────────────────┐ │ │ │
+│                             │  │  │ Container Group     │ │ │ │
+│                             │  │  │ (VoIP Server)       │ │ │ │
+│                             │  │  │ Private IP: 10.0.1.4│ │ │ │
+│                             │  │  │ Port: 5060 UDP      │ │ │ │
+│                             │  │  └─────────────────────┘ │ │ │
+│                             │  │                          │ │ │
+│                             │  │  ┌─────────────────────┐ │ │ │
+│                             │  │  │ Container Group     │ │ │ │
+│                             │  │  │ (Web Server)        │ │ │ │
+│                             │  │  │ Private IP: 10.0.1.5│ │ │ │
+│                             │  │  │ Port: 8080 TCP      │ │ │ │
+│                             │  │  └─────────────────────┘ │ │ │
+│                             │  └──────────────────────────┘ │ │
+│                             └──────────────────────────────┘ │
+└───────────────────────────────────────────────────────────────┘
+
+Traffic Flow:
+Internet → 20.0.0.1:5060 → Azure Firewall (DNAT) → 10.0.1.4:5060 (VoIP)
+Internet → 20.0.0.1:8080 → Azure Firewall (DNAT) → 10.0.1.5:8080 (Web)
+```
+
+## Prerequisites
+
+1. **Resource Group**: Azure resource group
+2. **Virtual Network**: VNet with at least 2 subnets:
+   - `AzureFirewallSubnet`: Dedicated subnet for firewall (minimum /26, e.g., 10.0.0.0/26)
+   - Delegated subnet for container instances (e.g., 10.0.1.0/24)
+3. **Public IP**: Standard SKU public IP for the firewall
+4. **Budget**: ~$900/month for firewall + container costs
+
+## Quick Start
+
+### Step 1: Create Network Infrastructure
+
+```bash
+# Create resource group (if not exists)
+az group create --name acido-firewall-rg --location westeurope
+
+# Create VNet
+acido ip create firewall-ip --with-nat-stack
+
+# Create firewall subnet (must be named "AzureFirewallSubnet")
+az network vnet subnet create \
+  --resource-group acido-firewall-rg \
+  --vnet-name firewall-ip-vnet \
+  --name AzureFirewallSubnet \
+  --address-prefixes 10.0.0.0/26
+```
+
+### Step 2: Create Azure Firewall
+
+```bash
+# Create public IP for firewall
+acido ip create fw-public-ip
+
+# Create Azure Firewall (~$900/month)
+acido firewall create my-firewall \
+  --vnet firewall-ip-vnet \
+  --subnet AzureFirewallSubnet \
+  --public-ip fw-public-ip
+```
+
+This will take 5-10 minutes to deploy.
+
+### Step 3: Deploy Container with Private IP
+
+```bash
+# Deploy VoIP server without public IP (uses private IP from subnet)
+acido run voip-server \
+  -im asterisk:latest \
+  -t "./start-asterisk.sh" \
+  --cpu 2 \
+  --ram 4 \
+  -d 86400
+
+# Get the container's private IP
+acido ls
+# Note the private IP (e.g., 10.0.1.4)
+```
+
+### Step 4: Add DNAT Rule to Forward Traffic
+
+```bash
+# Get firewall public IP
+FW_PUBLIC_IP=$(az network public-ip show \
+  --resource-group acido-firewall-rg \
+  --name fw-public-ip \
+  --query ipAddress -o tsv)
+
+echo "Firewall Public IP: $FW_PUBLIC_IP"
+
+# Add DNAT rule to forward UDP port 5060 to container
+acido firewall add-rule my-firewall \
+  --rule-name voip-sip-udp \
+  --collection voip-rules \
+  --dest-ip $FW_PUBLIC_IP \
+  --dest-port 5060 \
+  --target-ip 10.0.1.4 \
+  --target-port 5060 \
+  --protocol UDP
+
+# Add DNAT rule for TCP as well
+acido firewall add-rule my-firewall \
+  --rule-name voip-sip-tcp \
+  --collection voip-rules \
+  --dest-ip $FW_PUBLIC_IP \
+  --dest-port 5060 \
+  --target-ip 10.0.1.4 \
+  --target-port 5060 \
+  --protocol TCP
+```
+
+### Step 5: Test Connectivity
+
+```bash
+# Test UDP connectivity from external network
+# Replace $FW_PUBLIC_IP with your firewall's public IP
+echo "SIP test" | nc -u $FW_PUBLIC_IP 5060
+
+# Test TCP connectivity
+telnet $FW_PUBLIC_IP 5060
+```
+
+### Step 6: List and Manage Firewalls
+
+```bash
+# List all firewalls
+acido firewall ls
+
+# Remove DNAT rule
+acido firewall delete-rule my-firewall \
+  --rule-name voip-sip-udp \
+  --collection voip-rules
+
+# Remove firewall (saves ~$900/month)
+acido firewall rm my-firewall
+```
+
+## CLI Commands
+
+### Firewall Management
+
+```bash
+# Create firewall
+acido firewall create <name> \
+  --vnet <vnet-name> \
+  --subnet <subnet-name> \
+  --public-ip <public-ip-name>
+
+# List firewalls
+acido firewall ls
+
+# Remove firewall
+acido firewall rm <name>
+```
+
+### DNAT Rule Management
+
+```bash
+# Add DNAT rule
+acido firewall add-rule <firewall-name> \
+  --rule-name <rule-name> \
+  --collection <collection-name> \
+  --source <source-ip> \  # Optional, defaults to "*" (any)
+  --dest-ip <firewall-public-ip> \
+  --dest-port <port> \
+  --target-ip <container-private-ip> \
+  --target-port <port> \
+  --protocol <TCP|UDP|Any>
+
+# Delete DNAT rule
+acido firewall delete-rule <firewall-name> \
+  --rule-name <rule-name> \
+  --collection <collection-name>
+```
+
+## Examples
+
+### Example 1: VoIP Server (Asterisk)
+
+```bash
+# 1. Create firewall infrastructure
+acido ip create voip-ip --with-nat-stack
+acido firewall create voip-firewall \
+  --vnet voip-ip-vnet \
+  --subnet AzureFirewallSubnet \
+  --public-ip voip-ip
+
+# 2. Deploy VoIP server with private IP
+acido run asterisk-prod \
+  -im asterisk:latest \
+  -t "./start-asterisk.sh" \
+  --cpu 4 \
+  --ram 8 \
+  -d 86400
+
+# 3. Get container private IP (assume 10.0.1.4)
+# 4. Add DNAT rules for SIP signaling
+acido firewall add-rule voip-firewall \
+  --rule-name sip-udp \
+  --collection voip \
+  --dest-ip <FW_PUBLIC_IP> \
+  --dest-port 5060 \
+  --target-ip 10.0.1.4 \
+  --target-port 5060 \
+  --protocol UDP
+
+# 5. Test: External SIP clients can now connect to <FW_PUBLIC_IP>:5060
+```
+
+### Example 2: Multiple Containers Behind One Firewall
+
+```bash
+# Deploy multiple containers
+acido run web-server \
+  -im nginx:latest \
+  --cpu 2 --ram 4 -d 86400
+
+acido run api-server \
+  -im myapi:latest \
+  --cpu 2 --ram 4 -d 86400
+
+# Forward different ports to different containers
+acido firewall add-rule my-firewall \
+  --rule-name web-http \
+  --collection web-rules \
+  --dest-ip <FW_PUBLIC_IP> \
+  --dest-port 80 \
+  --target-ip 10.0.1.5 \
+  --target-port 80 \
+  --protocol TCP
+
+acido firewall add-rule my-firewall \
+  --rule-name api-https \
+  --collection web-rules \
+  --dest-ip <FW_PUBLIC_IP> \
+  --dest-port 443 \
+  --target-ip 10.0.1.6 \
+  --target-port 443 \
+  --protocol TCP
+```
+
+## Comparison: Firewall vs Bidirectional
+
+| Feature | Firewall (Solution 4) | Bidirectional (Solution 1) |
+|---------|----------------------|----------------------------|
+| **Cost** | ~$900/month | ~$13/month per container |
+| **Complexity** | High (hub-spoke) | Low (direct IP) |
+| **Security Features** | Advanced (FQDN, threat intel) | Basic (NSG rules) |
+| **Centralized Control** | ✅ Yes | ❌ No |
+| **Multiple Containers** | ✅ Shared firewall | ⚠️ One IP per container |
+| **Port Translation** | ✅ Yes | ❌ No |
+| **Setup Time** | 5-10 minutes | 1-2 minutes |
+| **Use Case** | Enterprise | Individual containers |
+
+## Troubleshooting
+
+### Firewall creation takes too long
+Azure Firewall deployment typically takes 5-10 minutes. If it takes longer than 15 minutes, check Azure Portal for deployment status.
+
+### DNAT rule not working
+1. Verify firewall public IP: `az network public-ip show ...`
+2. Check container private IP: `acido ls`
+3. Verify subnet configuration
+4. Check NSG rules (if any)
+5. Test internal connectivity first
+
+### High costs
+Azure Firewall is expensive (~$900/month). Consider:
+- Using `--bidirectional` flag for individual containers (~$13/month)
+- Consolidating multiple containers behind one firewall
+- Using firewall only for production environments
+
+## Best Practices
+
+1. **Cost Management**:
+   - Use firewall only when enterprise features are needed
+   - Consider `--bidirectional` for dev/test environments
+   - Monitor monthly costs in Azure Portal
+
+2. **Security**:
+   - Restrict source IPs in DNAT rules when possible
+   - Use Network Security Groups (NSGs) for additional filtering
+   - Enable Azure Firewall threat intelligence
+
+3. **Network Design**:
+   - Use /26 or larger subnet for Azure Firewall
+   - Plan IP address space carefully
+   - Document all DNAT rules
+
+4. **Operations**:
+   - Use descriptive names for rules and collections
+   - Tag resources for cost tracking
+   - Monitor firewall logs in Azure Monitor
+
+## References
+
+- [Azure Firewall Documentation](https://docs.microsoft.com/azure/firewall/)
+- [Azure Firewall DNAT Rules](https://docs.microsoft.com/azure/firewall/tutorial-firewall-dnat)
+- [Port Forwarding Proposal](../docs/PORT_FORWARDING_PROPOSAL.md)
+- [Solution Comparison](../docs/PORT_FORWARDING_SUMMARY.md)
+
+## Support
+
+For issues or questions:
+1. Check [GitHub Issues](https://github.com/merabytes/acido/issues)
+2. Review documentation in `docs/` directory
+3. Contact: Xavier Álvarez (xalvarez@merabytes.com)

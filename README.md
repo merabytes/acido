@@ -250,6 +250,8 @@ Acido supports bidirectional connectivity for containers that need to accept inb
 - **Public IP assignment**: Bidirectional containers get a dedicated public IP for inbound traffic
 - **Fleet unchanged**: `acido fleet` always uses NAT Gateway (no bidirectional support)
 
+**💼 Enterprise Option**: For advanced security and centralized control, see [Azure Firewall Integration](docs/AZURE_FIREWALL.md) (Solution 4 - ~$900/month)
+
 **Examples:**
 
 ```bash
