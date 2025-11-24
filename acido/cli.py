@@ -870,13 +870,13 @@ class Acido(object):
     def create_firewall(self, firewall_name, vnet_name, subnet_name, public_ip_name):
         """
         Create an Azure Firewall for enterprise port forwarding (Solution 4).
-        Also ensures a delegated subnet exists for container instances.
+        Creates full network stack: Public IP, VNet, AzureFirewallSubnet, container subnet, and Firewall.
         
         Args:
             firewall_name (str): Name for the Azure Firewall
-            vnet_name (str): Virtual Network name
+            vnet_name (str): Virtual Network name (will be created if doesn't exist)
             subnet_name (str): Firewall subnet name (must be "AzureFirewallSubnet")
-            public_ip_name (str): Public IP name to assign to firewall
+            public_ip_name (str): Public IP name (will be created if doesn't exist)
             
         Returns:
             AzureFirewall: Created firewall resource or None on failure
@@ -890,11 +890,50 @@ class Acido(object):
             print(orange("Cost: ~$1.25/hour (~$900/month)"))
             print(info("This operation may take 5-10 minutes..."))
             
-            # Ensure container subnet exists (separate from firewall subnet)
+            # Step 1: Create Public IP if it doesn't exist
+            print(info(f"Step 1/5: Creating/verifying Public IP: {public_ip_name}"))
+            try:
+                pip = self.network_manager.get_public_ip(public_ip_name)
+                print(good(f"Using existing Public IP: {public_ip_name}"))
+                pip_id = pip.id
+            except Exception:
+                # Public IP doesn't exist, create it
+                pip_id = self.network_manager.create_ipv4(public_ip_name, with_nat_stack=False)
+            
+            # Step 2: Create VNet if it doesn't exist
+            print(info(f"Step 2/5: Creating/verifying Virtual Network: {vnet_name}"))
+            try:
+                vnet = self.network_manager._client.virtual_networks.get(
+                    self.network_manager.resource_group, vnet_name
+                )
+                print(good(f"Using existing VNet: {vnet_name}"))
+            except Exception:
+                # VNet doesn't exist, create it
+                vnet = self.network_manager.create_virtual_network(vnet_name, cidr="10.0.0.0/16")
+            
+            # Step 3: Create AzureFirewallSubnet if it doesn't exist
+            print(info(f"Step 3/5: Creating/verifying Firewall subnet: {subnet_name}"))
+            try:
+                fw_subnet = self.network_manager._client.subnets.get(
+                    self.network_manager.resource_group, vnet_name, subnet_name
+                )
+                print(good(f"Using existing Firewall subnet: {subnet_name}"))
+            except Exception:
+                # Firewall subnet doesn't exist, create it
+                from azure.mgmt.network.models import Subnet
+                fw_subnet = self.network_manager._client.subnets.begin_create_or_update(
+                    self.network_manager.resource_group, vnet_name, subnet_name,
+                    Subnet(address_prefix="10.0.0.0/26")  # /26 minimum for firewall
+                ).result()
+                print(good(f"Firewall subnet {subnet_name} created"))
+            
+            # Step 4: Create container ingress subnet
             container_subnet_name = FIREWALL_CONTAINER_SUBNET_NAME
-            print(info(f"Ensuring container subnet exists: {container_subnet_name}"))
+            print(info(f"Step 4/5: Creating/verifying container subnet: {container_subnet_name}"))
             self.ensure_ingress_subnet(vnet_name, container_subnet_name)
             
+            # Step 5: Create the firewall
+            print(info(f"Step 5/5: Creating Azure Firewall: {firewall_name}"))
             firewall = self.firewall_manager.create_firewall(
                 firewall_name=firewall_name,
                 vnet_name=vnet_name,

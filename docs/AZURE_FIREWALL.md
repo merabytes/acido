@@ -75,50 +75,39 @@ Internet → 20.0.0.1:8080 → Azure Firewall (DNAT) → 10.0.1.5:8080 (Web)
 ## Prerequisites
 
 1. **Resource Group**: Azure resource group
-2. **Virtual Network**: VNet with at least 2 subnets:
-   - `AzureFirewallSubnet`: Dedicated subnet for firewall (minimum /26, e.g., 10.0.0.0/26)
-   - Delegated subnet for container instances (e.g., 10.0.1.0/24)
-3. **Public IP**: Standard SKU public IP for the firewall
-4. **Budget**: ~$900/month for firewall + container costs
+2. **No manual setup required**: The `acido firewall create` command automatically creates:
+   - Virtual Network (VNet)
+   - `AzureFirewallSubnet` (minimum /26 for firewall)
+   - `container-ingress-subnet` (for container instances)
+   - Public IP for the firewall
+3. **Budget**: ~$900/month for firewall + container costs
 
 ## Quick Start
 
-### Step 1: Create Network Infrastructure
+### Step 1: Create Azure Firewall (Auto-creates full network stack)
 
 ```bash
 # Create resource group (if not exists)
 az group create --name acido-firewall-rg --location westeurope
 
-# Create VNet
-acido ip create firewall-ip --with-nat-stack
-
-# Create firewall subnet (must be named "AzureFirewallSubnet")
-az network vnet subnet create \
-  --resource-group acido-firewall-rg \
-  --vnet-name firewall-ip-vnet \
-  --name AzureFirewallSubnet \
-  --address-prefixes 10.0.0.0/26
-```
-
-### Step 2: Create Azure Firewall
-
-```bash
-# Create public IP for firewall
-acido ip create fw-public-ip
-
-# Create Azure Firewall (~$900/month)
+# Create Azure Firewall with full network stack (~$900/month)
+# This automatically creates: VNet, AzureFirewallSubnet, container subnet, and Public IP
 acido firewall create my-firewall \
-  --vnet firewall-ip-vnet \
+  --vnet my-vnet \
   --subnet AzureFirewallSubnet \
   --public-ip fw-public-ip
 ```
 
-This will take 5-10 minutes to deploy.
+This will take 5-10 minutes to deploy and automatically creates:
+- Public IP: `fw-public-ip`
+- Virtual Network: `my-vnet` (10.0.0.0/16)
+- Firewall Subnet: `AzureFirewallSubnet` (10.0.0.0/26)
+- Container Subnet: `container-ingress-subnet` (10.0.2.0/24)
 
-### Step 3: Deploy Container with Private IP
+### Step 2: Deploy Container with Private IP
 
 ```bash
-# Deploy VoIP server without public IP (uses private IP from subnet)
+# Deploy VoIP server - automatically uses firewall ingress subnet
 acido run voip-server \
   -im asterisk:latest \
   -t "./start-asterisk.sh" \
@@ -126,29 +115,29 @@ acido run voip-server \
   --ram 4 \
   -d 86400
 
+# Container automatically gets:
+# - Private IP in container-ingress-subnet
+# - FIREWALL_PUBLIC_IP environment variable
+# - FIREWALL_NAME environment variable
+
 # Get the container's private IP
 acido ls
-# Note the private IP (e.g., 10.0.1.4)
+# Note the private IP (e.g., 10.0.2.4)
 ```
 
-### Step 4: Add DNAT Rule to Forward Traffic
+### Step 3: Add DNAT Rule to Forward Traffic
 
 ```bash
-# Get firewall public IP
-FW_PUBLIC_IP=$(az network public-ip show \
-  --resource-group acido-firewall-rg \
-  --name fw-public-ip \
-  --query ipAddress -o tsv)
-
-echo "Firewall Public IP: $FW_PUBLIC_IP"
+# The firewall public IP is already injected in the container as FIREWALL_PUBLIC_IP
+# You can also get it from the firewall config or Azure portal
 
 # Add DNAT rule to forward UDP port 5060 to container
 acido firewall add-rule my-firewall \
   --rule-name voip-sip-udp \
   --collection voip-rules \
-  --dest-ip $FW_PUBLIC_IP \
+  --dest-ip <FIREWALL_PUBLIC_IP> \
   --dest-port 5060 \
-  --target-ip 10.0.1.4 \
+  --target-ip 10.0.2.4 \
   --target-port 5060 \
   --protocol UDP
 
@@ -156,25 +145,21 @@ acido firewall add-rule my-firewall \
 acido firewall add-rule my-firewall \
   --rule-name voip-sip-tcp \
   --collection voip-rules \
-  --dest-ip $FW_PUBLIC_IP \
+  --dest-ip <FIREWALL_PUBLIC_IP> \
   --dest-port 5060 \
-  --target-ip 10.0.1.4 \
+  --target-ip 10.0.2.4 \
   --target-port 5060 \
   --protocol TCP
 ```
 
-### Step 5: Test Connectivity
+### Step 4: Test Connectivity
 
 ```bash
-# Test UDP connectivity from external network
-# Replace $FW_PUBLIC_IP with your firewall's public IP
-echo "SIP test" | nc -u $FW_PUBLIC_IP 5060
-
 # Test TCP connectivity
-telnet $FW_PUBLIC_IP 5060
+telnet <FIREWALL_PUBLIC_IP> 5060
 ```
 
-### Step 6: List and Manage Firewalls
+### Step 5: List and Manage Firewalls
 
 ```bash
 # List all firewalls
