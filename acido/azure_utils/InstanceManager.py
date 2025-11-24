@@ -5,7 +5,7 @@ from azure.mgmt.containerinstance.models import (
     ContainerGroup, Container, ImageRegistryCredential, ResourceRequirements,
     ResourceRequests, OperatingSystemTypes, EnvironmentVariable,
     ResourceIdentityType, ContainerGroupIdentity, UserAssignedIdentities,
-    IpAddress, Port, ContainerGroupSubnetId
+    IpAddress, Port, ContainerGroupSubnetId, ContainerPort
 )
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
 from huepy import bad, good
@@ -100,6 +100,16 @@ class InstanceManager(ManagedIdentity):
 
         results = {}
         deploy_instances = []
+        
+        # Determine which ports to expose on containers
+        container_ports = None
+        if exposed_ports:
+            # Bidirectional mode: expose ports on containers using ContainerPort
+            container_ports = [ContainerPort(protocol=p["protocol"], port=p["port"]) 
+                              for p in exposed_ports]
+        elif expose_private_port:
+            # Private IP mode: expose single port using ContainerPort
+            container_ports = [ContainerPort(protocol="TCP", port=expose_private_port)]
 
         for i_num in range(1, instance_number + 1):
             env_vars['INSTANCE_NAME'] = f'{name}-{i_num:02d}'
@@ -118,7 +128,7 @@ class InstanceManager(ManagedIdentity):
                     image=image_name,
                     env_vars=env_vars,
                     command=["/opt/acido-venv/bin/acido", "-sh", command] if scan_cmd else None,
-                    ports=[Port(protocol="TCP", port=expose_private_port)] if expose_private_port else None
+                    ports=container_ports
                 )
             )
 
