@@ -18,7 +18,7 @@ from acido.utils.lambda_utils import (
 )
 
 # Valid operation types
-VALID_OPERATIONS = ['fleet', 'run', 'ls', 'rm', 'ip_create', 'ip_ls', 'ip_rm']
+VALID_OPERATIONS = ['fleet', 'run', 'ls', 'rm', 'ip_create', 'ip_ls', 'ip_rm', 'ip_clean']
 
 def _validate_targets(targets):
     """Validate targets parameter."""
@@ -64,7 +64,7 @@ def _cleanup_file(filepath):
         pass
 
 
-def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_file, regions=None):
+def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_file, regions=None, max_cpu=None, max_ram=None):
     """Execute fleet operation and return response and outputs."""
     pool = ThreadPoolShim(processes=30)
     full_image_url = acido.build_image_url(image_name)
@@ -81,11 +81,14 @@ def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_fil
         interactive=False,
         quiet=True,
         pool=pool,
-        regions=regions
+        regions=regions,
+        max_cpu=max_cpu,
+        max_ram=max_ram
     )
 
 
-def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None):
+def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None, 
+                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16):
     """Execute run operation (single ephemeral instance) and return response and outputs."""
     full_image_url = acido.build_image_url(image_name)
     
@@ -98,7 +101,11 @@ def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None)
         output_format='json',
         quiet=True,
         cleanup=cleanup,
-        regions=regions
+        regions=regions,
+        bidirectional=bidirectional,
+        exposed_ports=exposed_ports,
+        max_cpu=max_cpu,
+        max_ram=max_ram
     )
 
 
@@ -123,10 +130,10 @@ def _execute_rm(acido, name):
     return {'removed': name}
 
 
-def _execute_ip_create(acido, name):
-    """Execute ip_create operation to create IPv4 address and network profile."""
-    acido.create_ipv4_address(name)
-    return {'created': name}
+def _execute_ip_create(acido, name, with_nat_stack=False):
+    """Execute ip_create operation to create IPv4 address and optionally network profile."""
+    acido.create_ipv4_address(name, with_nat_stack=with_nat_stack)
+    return {'created': name, 'with_nat_stack': with_nat_stack}
 
 
 def _execute_ip_ls(acido):
@@ -139,6 +146,12 @@ def _execute_ip_rm(acido, name):
     """Execute ip_rm operation to remove IPv4 address and network profile."""
     success = acido.rm_ip(name)
     return {'removed': name, 'success': success}
+
+
+def _execute_ip_clean(acido):
+    """Execute ip_clean operation to clean IP configuration from local config."""
+    acido.clean_ip_config()
+    return {'message': 'IP configuration cleaned from local config'}
 
 
 def lambda_handler(event, context):
@@ -279,6 +292,9 @@ def lambda_handler(event, context):
             return build_error_response(
                 f'Missing required fields for ip_rm operation: {", ".join(missing_fields)}'
             )
+    elif operation == 'ip_clean':
+        # ip_clean operation doesn't require any additional fields
+        pass
     else:  # operation == 'fleet'
         required_fields = ['image', 'targets', 'task']
         is_valid, missing_fields = validate_required_fields(event, required_fields)
@@ -308,9 +324,20 @@ def lambda_handler(event, context):
             cleanup = event.get('cleanup', True)  # Default to auto-cleanup
             regions = _normalize_regions(event)
             
+            # New parameters for port forwarding
+            bidirectional = event.get('bidirectional', False)
+            exposed_ports = event.get('exposed_ports', None)  # List of {"port": 5060, "protocol": "UDP"}
+            max_cpu = event.get('max_cpu', event.get('cpu', 4))
+            max_ram = event.get('max_ram', event.get('ram', 16))
+            
+            # Validate: If bidirectional, must have exposed_ports
+            if bidirectional and not exposed_ports:
+                return build_error_response('bidirectional requires exposed_ports to be specified')
+            
             # Execute run operation
             response, outputs = _execute_run(
-                acido, name, image_name, task, duration, cleanup, regions
+                acido, name, image_name, task, duration, cleanup, regions,
+                bidirectional, exposed_ports, max_cpu, max_ram
             )
             
             # Return successful response
@@ -321,6 +348,8 @@ def lambda_handler(event, context):
                 'duration': duration,
                 'cleanup': cleanup,
                 'regions': regions,
+                'bidirectional': bidirectional,
+                'exposed_ports': exposed_ports if exposed_ports else [],
                 'outputs': outputs
             })
         
@@ -346,9 +375,10 @@ def lambda_handler(event, context):
             })
         
         elif operation == 'ip_create':
-            # IP Create operation: create IPv4 address and network profile
+            # IP Create operation: create IPv4 address and optionally network profile
             name = event.get('name')
-            result = _execute_ip_create(acido, name)
+            with_nat_stack = event.get('with_nat_stack', False)
+            result = _execute_ip_create(acido, name, with_nat_stack)
             
             # Return successful response
             return build_response(200, {
@@ -376,6 +406,16 @@ def lambda_handler(event, context):
                 'operation': 'ip_rm',
                 'result': result
             })
+        
+        elif operation == 'ip_clean':
+            # IP Clean operation: clean IP configuration from local config
+            result = _execute_ip_clean(acido)
+            
+            # Return successful response
+            return build_response(200, {
+                'operation': 'ip_clean',
+                'result': result
+            })
             
         else:  # operation == 'fleet'
             # Fleet operation: multiple instances for distributed scanning
@@ -386,13 +426,16 @@ def lambda_handler(event, context):
             fleet_name = event.get('fleet_name', 'lambda-fleet')
             num_instances = event.get('num_instances', len(targets) if targets else 1)
             regions = _normalize_regions(event)
+            max_cpu = event.get('max_cpu', event.get('cpu', None))
+            max_ram = event.get('max_ram', event.get('ram', None))
             
             # Create temporary input file with targets
             input_file = _create_input_file(targets)
             
             # Execute fleet operation
             response, outputs = _execute_fleet(
-                acido, fleet_name, num_instances, image_name, task, input_file, regions
+                acido, fleet_name, num_instances, image_name, task, input_file, regions,
+                max_cpu, max_ram
             )
             
             # Clean up temporary input file
