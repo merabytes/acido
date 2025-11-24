@@ -4,7 +4,7 @@ from azure.mgmt.network.models import (
     NatGatewaySku, SubResource, NatGateway
 )
 from acido.azure_utils.ManagedIdentity import ManagedIdentity
-from huepy import good
+from huepy import good, orange
 
 __authors__ = "Juan Ramón Higueras Pica (jrhigueras@dabbleam.com)"
 __coauthor__ = "Xavier Álvarez Delgado (xalvarez@merabytes.com)"
@@ -188,6 +188,6 @@ class NetworkManager(ManagedIdentity):
             print(good(f"Public IP {public_ip_name} deleted successfully."))
             return True
         except Exception as e:
-            print(good(f"Public IP {public_ip_name} not found or already deleted: {e}"))
+            print(orange(f"Public IP {public_ip_name} not found or already deleted: {e}"))
             return False
 

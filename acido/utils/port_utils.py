@@ -30,9 +30,19 @@ def parse_port_spec(port_spec):
             "port": port_num,
             "protocol": protocol_upper
         }
-    except (ValueError, IndexError) as e:
-        raise ValueError(f"Invalid port specification: {port_spec}. "
-                        f"Format should be PORT:PROTOCOL (e.g., 5060:udp)")
+    except ValueError as e:
+        # Preserve original error details while providing helpful message
+        raise ValueError(
+            f"Invalid port specification: {port_spec}. "
+            f"Format should be PORT:PROTOCOL (e.g., 5060:udp). "
+            f"Original error: {str(e)}"
+        ) from e
+    except IndexError as e:
+        raise ValueError(
+            f"Invalid port specification: {port_spec}. "
+            f"Format should be PORT:PROTOCOL (e.g., 5060:udp). "
+            f"Original error: {str(e)}"
+        ) from e
 
 def validate_port(port):
     """

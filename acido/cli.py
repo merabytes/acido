@@ -575,9 +575,19 @@ class Acido(object):
         print(good("Please select an IP address:"))
         selected_description = select(ip_descriptions, cursor_style="cyan")
         
-        # Extract selected info
-        selected_ip_address = selected_description.split('(')[1].split(')')[0]  # Extract IP from (ip_address)
-        name = selected_description.split(' ')[0]  # Extract name
+        # Extract name directly from the selected info by matching the description
+        # More robust than string parsing
+        name = None
+        for info in ip_addresses_info:
+            nat_indicator = " [with NAT stack]" if info.get('has_nat_stack') else " [standalone]"
+            expected_desc = f"{info['name']} ({info['ip_address']}){nat_indicator}"
+            if expected_desc == selected_description:
+                name = info['name']
+                break
+        
+        if not name:
+            print(bad("Failed to parse selected IP address"))
+            return
         
         chosen = next(x for x in ip_addresses_info if x['name'] == name)
         
