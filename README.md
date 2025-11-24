@@ -299,6 +299,12 @@ acido fleet scan -n 10 -im nmap \
 - Multiple ports can be exposed by repeating `--expose-port`
 - Container IP is printed after deployment for easy access
 - Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)
+- **Required**: `acido run` requires either `--entrypoint` or `--task` (or both) - no defaults are applied
+
+**Command Execution:**
+- `--task` / `-t`: Override the container's CMD (command to execute)
+- `--entrypoint`: Override the container's ENTRYPOINT
+- Both can be used together: entrypoint is executed with task as arguments
 
 ### Environment Variables
 

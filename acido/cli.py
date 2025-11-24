@@ -153,7 +153,8 @@ fleet_parser.add_argument('-e', '--env', dest='env_vars', action='append',
 run_parser = subparsers.add_parser('run', help='Run a single ephemeral container instance with auto-cleanup after specified duration')
 run_parser.add_argument('name', help='Container instance name')
 run_parser.add_argument('-im', '--image', dest='image_name', default='ubuntu', help='Image name')
-run_parser.add_argument('-t', '--task', dest='task', help='Command to execute')
+run_parser.add_argument('--entrypoint', dest='entrypoint', help='Override container entrypoint (e.g., "/bin/bash", "python")')
+run_parser.add_argument('-t', '--task', dest='task', help='Command to execute (CMD override)')
 run_parser.add_argument('-d', '--duration', dest='duration', type=int, default=900, help='Duration in seconds before auto-cleanup (default: 900s/15min, max: 900s)')
 run_parser.add_argument('-o', '--output', dest='write_to_file', help='Save output to file')
 run_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'], default='txt', help='Output format')
@@ -972,7 +973,8 @@ class Acido(object):
             write_to_file: str = None, output_format: str = 'txt', 
             quiet: bool = False, cleanup: bool = True, regions=None,
             bidirectional: bool = False, exposed_ports: list = None,
-            max_cpu: int = 4, max_ram: int = 16, custom_env_vars: dict = None):
+            max_cpu: int = 4, max_ram: int = 16, custom_env_vars: dict = None,
+            entrypoint: str = None):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -984,13 +986,14 @@ class Acido(object):
         Args:
             name: Container instance name
             image_name: Full image URL
-            task: Command to execute (optional)
+            task: Command to execute (optional, but either task or entrypoint must be provided)
             duration: Duration in seconds before auto-cleanup (default: 900s/15min, max: 900s)
             write_to_file: Save output to file (optional)
             output_format: Output format ('txt' or 'json')
             quiet: Quiet mode with progress bar
             cleanup: Whether to auto-cleanup after duration (default: True)
             regions: List of Azure regions to select from. If None, defaults to ['westeurope'].
+            entrypoint: Override container entrypoint (optional, but either task or entrypoint must be provided)
         
         Returns:
             tuple: (response dict, outputs dict) or None if interactive mode
@@ -1071,11 +1074,24 @@ class Acido(object):
         # Deploy the single instance
         print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
         
+        # Construct command based on entrypoint and task
+        # If both are provided, combine them; if only one, use that one
+        command_to_execute = None
+        if entrypoint and task:
+            # Both provided: entrypoint with task as arguments
+            command_to_execute = f"{entrypoint} {task}"
+        elif entrypoint:
+            # Only entrypoint provided
+            command_to_execute = entrypoint
+        elif task:
+            # Only task provided
+            command_to_execute = task
+        
         response[name], _ = self.instance_manager.deploy(
             name=name,
             instance_number=1,
             image_name=image_name,
-            command=task,
+            command=command_to_execute,
             env_vars=env_vars,
             vnet_name=self.vnet_name,
             subnet_name=self.subnet_name,
@@ -2411,13 +2427,22 @@ def main():
             print(bad("--bidirectional requires --expose-port to be specified"))
             sys.exit(1)
         
+        # Validate: For run command, either --entrypoint or --task must be provided
+        entrypoint = getattr(args, 'entrypoint', None)
+        task = getattr(args, 'task', None)
+        if not entrypoint and not task:
+            print(bad("Error: 'acido run' requires either --entrypoint or --task (or both) to be specified"))
+            print(info("  Use --entrypoint to override the container's ENTRYPOINT"))
+            print(info("  Use --task to specify the command/CMD to execute"))
+            sys.exit(1)
+        
         # Parse custom environment variables if provided
         custom_env_vars = parse_env_vars(getattr(args, 'env_vars', None))
         
         acido.run(
             name=args.name,
             image_name=full_image_url,
-            task=args.task,
+            task=task,
             duration=args.duration,
             write_to_file=args.write_to_file,
             output_format=args.output_format,
@@ -2428,7 +2453,8 @@ def main():
             exposed_ports=exposed_ports,
             max_cpu=getattr(args, 'cpu', 4),
             max_ram=getattr(args, 'ram', 16),
-            custom_env_vars=custom_env_vars
+            custom_env_vars=custom_env_vars,
+            entrypoint=entrypoint
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))

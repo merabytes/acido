@@ -88,7 +88,7 @@ def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_fil
 
 
 def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None, 
-                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16):
+                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16, entrypoint=None):
     """Execute run operation (single ephemeral instance) and return response and outputs."""
     full_image_url = acido.build_image_url(image_name)
     
@@ -105,7 +105,8 @@ def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None,
         bidirectional=bidirectional,
         exposed_ports=exposed_ports,
         max_cpu=max_cpu,
-        max_ram=max_ram
+        max_ram=max_ram,
+        entrypoint=entrypoint
     )
 
 
@@ -252,12 +253,18 @@ def lambda_handler(event, context):
     
     # Validate required fields based on operation type before initializing Acido
     if operation == 'run':
-        required_fields = ['image', 'name', 'task']
+        required_fields = ['image', 'name']
         is_valid, missing_fields = validate_required_fields(event, required_fields)
         
         if not is_valid:
             return build_error_response(
                 f'Missing required fields for run operation: {", ".join(missing_fields)}'
+            )
+        
+        # For run operation, either 'task' or 'entrypoint' must be provided
+        if not event.get('task') and not event.get('entrypoint'):
+            return build_error_response(
+                'Run operation requires either "task" or "entrypoint" (or both) to be specified'
             )
     elif operation == 'rm':
         # rm operation requires 'name' field
@@ -320,6 +327,7 @@ def lambda_handler(event, context):
             name = event.get('name')
             image_name = event.get('image')
             task = event.get('task')
+            entrypoint = event.get('entrypoint')
             duration = event.get('duration', 900)  # Default 15 minutes
             cleanup = event.get('cleanup', True)  # Default to auto-cleanup
             regions = _normalize_regions(event)
@@ -337,7 +345,7 @@ def lambda_handler(event, context):
             # Execute run operation
             response, outputs = _execute_run(
                 acido, name, image_name, task, duration, cleanup, regions,
-                bidirectional, exposed_ports, max_cpu, max_ram
+                bidirectional, exposed_ports, max_cpu, max_ram, entrypoint
             )
             
             # Return successful response
