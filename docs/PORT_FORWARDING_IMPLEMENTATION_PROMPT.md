@@ -41,9 +41,19 @@ acido run <name> --public-ip <ip> --expose-port PORT:PROTOCOL
 
 # Fleet with network configuration
 acido fleet <name> --public-ip <ip>
+
+# NEW: Configurable CPU and RAM resources
+acido run <name> --cpu <cores> --ram <gb>
+acido fleet <name> --cpu <cores> --ram <gb>
 ```
 
 ### 2. Core Features
+
+**Configurable CPU and RAM** (NEW REQUIREMENT):
+- Add `--cpu` argument to `run` and `fleet` commands (default: varies by command)
+- Add `--ram` argument to `run` and `fleet` commands (default: varies by command)
+- Pass these values to `InstanceManager.deploy()` as `max_cpu` and `max_ram` parameters
+- Validate CPU and RAM values are within Azure Container Instances limits
 
 **Automatic Subnet Derivation**:
 - When `--public-ip voip-ip` is specified, automatically derive:
@@ -198,9 +208,21 @@ run_parser.add_argument('--public-ip', dest='public_ip_name',
 run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
                        help='Port to expose (format: PORT:PROTOCOL). Requires --public-ip.')
 
+# NEW: Add CPU and RAM arguments to run_parser
+run_parser.add_argument('--cpu', dest='cpu', type=float, default=1.0,
+                       help='CPU cores to allocate (default: 1.0, max: 4.0)')
+run_parser.add_argument('--ram', dest='ram', type=float, default=1.0,
+                       help='RAM in GB to allocate (default: 1.0, max: 16.0)')
+
 # Add to fleet_parser
 fleet_parser.add_argument('--public-ip', dest='public_ip_name',
                          help='Name of public IP for network configuration.')
+
+# NEW: Add CPU and RAM arguments to fleet_parser
+fleet_parser.add_argument('--cpu', dest='cpu', type=float, default=4.0,
+                         help='Total CPU cores for fleet (default: 4.0, distributed across instances)')
+fleet_parser.add_argument('--ram', dest='ram', type=float, default=16.0,
+                         help='Total RAM in GB for fleet (default: 16.0, distributed across instances)')
 ```
 
 Add Acido class methods:
@@ -286,13 +308,123 @@ elif args.subcommand == 'run':
         public_ip_name=args.public_ip_name,
         exposed_ports=exposed_ports,
         vnet_name=vnet_name,
-        subnet_name=subnet_name
+        subnet_name=subnet_name,
+        cpu=args.cpu,  # NEW: Pass CPU argument
+        ram=args.ram   # NEW: Pass RAM argument
     )
 
 # Similar updates for fleet command
+elif args.subcommand == 'fleet':
+    # ... existing warning and validation code ...
+    
+    # Automatically derive subnet from public IP if specified
+    vnet_name = None
+    subnet_name = None
+    if args.public_ip_name:
+        vnet_name, subnet_name = acido._derive_subnet_from_public_ip(args.public_ip_name)
+    
+    acido.fleet(
+        fleet_name=args.fleet_name,
+        instance_num=args.num_instances,
+        image_name=args.image_name,
+        scan_cmd=args.task,
+        input_file=args.input_file,
+        wait=args.wait,
+        write_to_file=args.write_to_file,
+        output_format=args.output_format,
+        quiet=args.quiet,
+        rm_when_done=args.rm_when_done,
+        regions=args.region,
+        vnet_name=vnet_name,
+        subnet_name=subnet_name,
+        max_cpu=args.cpu,  # NEW: Pass CPU argument (total for fleet)
+        max_ram=args.ram   # NEW: Pass RAM argument (total for fleet)
+    )
 ```
 
-Update `run()` and `fleet()` method signatures to accept new parameters.
+Update `run()` and `fleet()` method signatures to accept new parameters:
+
+```python
+def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
+        write_to_file: str = None, output_format: str = 'txt', 
+        quiet: bool = False, cleanup: bool = True, regions=None,
+        public_ip_name: str = None, exposed_ports: list = None,
+        vnet_name: str = None, subnet_name: str = None,
+        cpu: float = 1.0, ram: float = 1.0):  # NEW: CPU and RAM parameters
+    """
+    Run a single ephemeral container instance.
+    
+    New Args:
+        public_ip_name (str, optional): Name of public IP for port forwarding
+        exposed_ports (list, optional): List of port dicts to expose
+        vnet_name (str, optional): VNet name (auto-derived from public_ip if not provided)
+        subnet_name (str, optional): Subnet name (auto-derived from public_ip if not provided)
+        cpu (float, optional): CPU cores to allocate (default: 1.0, max: 4.0)
+        ram (float, optional): RAM in GB to allocate (default: 1.0, max: 16.0)
+    """
+    # Validate CPU and RAM
+    if cpu < 0.1 or cpu > 4.0:
+        raise ValueError(f"CPU must be between 0.1 and 4.0, got {cpu}")
+    if ram < 0.1 or ram > 16.0:
+        raise ValueError(f"RAM must be between 0.1 and 16.0 GB, got {ram}")
+    
+    # ... existing code ...
+    
+    # Pass CPU and RAM to instance_manager.deploy()
+    result = self.instance_manager.deploy(
+        name=name,
+        image_name=full_image_url,
+        command=task,
+        location=selected_region,
+        vnet_name=vnet_name,
+        subnet_name=subnet_name,
+        env_vars=env_vars,
+        quiet=quiet,
+        public_ip_name=public_ip_name,
+        exposed_ports=exposed_ports,
+        max_cpu=cpu,  # Pass CPU
+        max_ram=ram,  # Pass RAM
+        instance_number=1  # Single instance for run command
+    )
+
+def fleet(self, fleet_name: str, instance_num: int, image_name: str,
+          scan_cmd: str = None, input_file: str = None, wait: int = None,
+          write_to_file: str = None, output_format: str = 'txt',
+          quiet: bool = False, rm_when_done: bool = False, regions=None,
+          vnet_name: str = None, subnet_name: str = None,
+          max_cpu: float = 4.0, max_ram: float = 16.0):  # NEW: CPU and RAM parameters
+    """
+    Deploy a fleet of container instances.
+    
+    New Args:
+        vnet_name (str, optional): VNet name (auto-derived from public_ip if not provided)
+        subnet_name (str, optional): Subnet name (auto-derived from public_ip if not provided)
+        max_cpu (float, optional): Total CPU cores for fleet (default: 4.0, distributed across instances)
+        max_ram (float, optional): Total RAM in GB for fleet (default: 16.0, distributed across instances)
+    """
+    # Validate CPU and RAM
+    if max_cpu < 0.1 or max_cpu > 100.0:  # Higher limit for fleets
+        raise ValueError(f"Total CPU must be between 0.1 and 100.0, got {max_cpu}")
+    if max_ram < 0.1 or max_ram > 256.0:  # Higher limit for fleets
+        raise ValueError(f"Total RAM must be between 0.1 and 256.0 GB, got {max_ram}")
+    
+    # ... existing code ...
+    
+    # Pass CPU and RAM to instance_manager.deploy()
+    results = self.instance_manager.deploy(
+        name=fleet_name,
+        image_name=full_image_url,
+        command=scan_cmd,
+        location=selected_region,
+        vnet_name=vnet_name,
+        subnet_name=subnet_name,
+        env_vars=env_vars,
+        quiet=quiet,
+        max_cpu=max_cpu,  # Pass total CPU
+        max_ram=max_ram,  # Pass total RAM
+        instance_number=instance_num
+    )
+```
 
 #### lambda_handler.py (`lambda_handler.py`)
 
@@ -325,6 +457,8 @@ def lambda_handler(event, context):
     elif operation == 'run':
         public_ip_name = event.get('public_ip_name')
         exposed_ports = event.get('exposed_ports', [])
+        cpu = event.get('cpu', 1.0)  # NEW: Get CPU from event
+        ram = event.get('ram', 1.0)  # NEW: Get RAM from event
         
         # Automatically derive subnet from public IP
         vnet_name = None
@@ -340,7 +474,30 @@ def lambda_handler(event, context):
             public_ip_name=public_ip_name,
             exposed_ports=exposed_ports,
             vnet_name=vnet_name,
-            subnet_name=subnet_name
+            subnet_name=subnet_name,
+            cpu=cpu,  # NEW: Pass CPU
+            ram=ram   # NEW: Pass RAM
+        )
+        # ... return response ...
+    
+    elif operation == 'fleet':
+        # ... existing fleet code ...
+        max_cpu = event.get('max_cpu', 4.0)  # NEW: Get CPU from event
+        max_ram = event.get('max_ram', 16.0)  # NEW: Get RAM from event
+        
+        response, outputs = acido.fleet(
+            fleet_name=fleet_name,
+            instance_num=instance_num,
+            image_name=full_image_url,
+            scan_cmd=task,
+            input_file=input_file,
+            wait=wait,
+            quiet=True,
+            regions=regions,
+            vnet_name=vnet_name,
+            subnet_name=subnet_name,
+            max_cpu=max_cpu,  # NEW: Pass CPU
+            max_ram=max_ram   # NEW: Pass RAM
         )
         # ... return response ...
 ```
@@ -472,6 +629,8 @@ acido ip rm test-ip
    - Add `ip clean` subcommand
    - Add `--public-ip` and `--expose-port` arguments to `run` command
    - Add `--public-ip` argument to `fleet` command
+   - **NEW**: Add `--cpu` and `--ram` arguments to `run` command
+   - **NEW**: Add `--cpu` and `--ram` arguments to `fleet` command
 
 4. **Phase 4**: Acido class methods
    - Implement `create_forwarding_ip()`
@@ -479,13 +638,14 @@ acido ip rm test-ip
    - Implement `rm_forwarding_ip()`
    - Implement `clean_ip_config()`
    - Implement `_derive_subnet_from_public_ip()`
-   - Update `run()` method signature
-   - Update `fleet()` method signature
+   - Update `run()` method signature with CPU and RAM parameters
+   - Update `fleet()` method signature with CPU and RAM parameters
 
 5. **Phase 5**: Command handlers
    - Add IP forwarding subcommand handlers
    - Add config warning logic for `run` and `fleet`
    - Add automatic subnet derivation logic
+   - **NEW**: Add CPU and RAM validation and passing to methods
 
 6. **Phase 6**: Lambda support
    - Add new operations to `VALID_OPERATIONS`
@@ -493,6 +653,7 @@ acido ip rm test-ip
    - Implement `ip_ls_forwarding` handler
    - Implement `ip_clean` handler
    - Update `run` operation with automatic subnet derivation
+   - **NEW**: Support CPU and RAM parameters in Lambda events
 
 7. **Phase 7**: Helper utilities
    - Create `port_utils.py` with port parsing/validation
@@ -513,13 +674,15 @@ acido ip rm test-ip
 # Create network stack with port forwarding IP
 acido ip create-forwarding voip-ip --ports 5060:udp --ports 5060:tcp
 
-# Deploy VoIP server with automatic network configuration
+# Deploy VoIP server with automatic network configuration and custom resources
 acido run asterisk-prod \
   -im asterisk:latest \
   -t "./start-asterisk.sh" \
   --public-ip voip-ip \
   --expose-port 5060:udp \
   --expose-port 5060:tcp \
+  --cpu 2.0 \
+  --ram 4.0 \
   -d 86400
 
 # System automatically uses:
@@ -551,7 +714,24 @@ acido ip rm voip-ip
     {"port": 5060, "protocol": "UDP"},
     {"port": 5060, "protocol": "TCP"}
   ],
+  "cpu": 2.0,
+  "ram": 4.0,
   "duration": 86400
+}
+```
+
+Fleet example with custom resources:
+```json
+{
+  "operation": "fleet",
+  "fleet_name": "scan-fleet",
+  "instance_num": 10,
+  "image": "nmap",
+  "task": "nmap -iL input",
+  "input_file": "targets.txt",
+  "max_cpu": 10.0,
+  "max_ram": 20.0,
+  "regions": ["westeurope", "eastus"]
 }
 ```
 
@@ -562,6 +742,8 @@ acido ip rm voip-ip
 - ✅ Config warnings display when appropriate
 - ✅ `ip clean` command clears config
 - ✅ Port forwarding works end-to-end (inbound connectivity verified)
+- ✅ **NEW**: CPU and RAM arguments work for both `run` and `fleet` commands
+- ✅ **NEW**: Resource limits are validated (CPU: 0.1-4.0 for run, 0.1-100 for fleet; RAM: 0.1-16 for run, 0.1-256 for fleet)
 - ✅ Lambda operations function correctly
 - ✅ Unit tests pass
 - ✅ Integration tests pass
@@ -574,6 +756,12 @@ acido ip rm voip-ip
 - **No Config Dependency**: Automatic subnet derivation eliminates need to read from config file
 - **Cost**: ~$13/month per container with port forwarding (Public IP $3.60 + Container $9.40)
 - **Security**: Containers with public IPs are directly exposed to internet - ensure application-level auth and rate limiting
+- **NEW - Resource Limits**: Azure Container Instances resource limits:
+  - **Single Container (run)**: CPU: 0.1-4.0 cores, RAM: 0.1-16.0 GB
+  - **Fleet (total across instances)**: CPU: 0.1-100+ cores, RAM: 0.1-256+ GB
+  - Resources are distributed across instances in a fleet (e.g., 10 instances with 10 CPU = 1 CPU per instance)
+  - Default for `run`: 1.0 CPU, 1.0 GB RAM
+  - Default for `fleet`: 4.0 CPU, 16.0 GB RAM (distributed across instances)
 
 ### 10. Reference Documentation
 
