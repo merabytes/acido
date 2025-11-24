@@ -8,7 +8,7 @@ from azure.mgmt.containerinstance.models import (
     IpAddress, Port, ContainerGroupSubnetId
 )
 from azure.core.exceptions import HttpResponseError, ResourceNotFoundError
-from huepy import bad
+from huepy import bad, good
 from shlex import quote
 import logging
 
@@ -84,7 +84,8 @@ class InstanceManager(ManagedIdentity):
                max_cpu: int = 4, image_name: str = None,
                env_vars: dict = {}, command: str = None,
                input_files: list = None, quiet: bool = False,
-               expose_private_port: int = None):
+               expose_private_port: int = None,
+               public_ip_id: str = None, exposed_ports: list = None):
 
         restart_policies = ["Always", "OnFailure", "Never"]
         if restart_policy not in restart_policies:
@@ -122,7 +123,17 @@ class InstanceManager(ManagedIdentity):
             )
 
         ip_cfg = None
-        if expose_private_port:
+        if public_ip_id and exposed_ports:
+            # Bidirectional mode: Public IP with specific exposed ports
+            if not quiet:
+                print(good(f"Configuring public IP with exposed ports"))
+            ip_cfg = IpAddress(
+                type="Public",
+                ports=[Port(protocol=p["protocol"], port=p["port"]) 
+                       for p in exposed_ports]
+            )
+        elif expose_private_port:
+            # Private IP mode (existing functionality)
             ip_cfg = IpAddress(type="Private", ports=[Port(protocol="TCP", port=expose_private_port)])
 
         # Build subnet_ids if vnet_name and subnet_name are provided
@@ -149,11 +160,20 @@ class InstanceManager(ManagedIdentity):
                     } if self.user_assigned else None
                 )
             )
-            self._client.container_groups.begin_create_or_update(
+            result = self._client.container_groups.begin_create_or_update(
                 resource_group_name=self.resource_group,
                 container_group_name=name,
                 container_group=cg
             ).result()
+            
+            # If public IP was requested, print the assigned IP
+            if public_ip_id and exposed_ports and result.ip_address:
+                assigned_ip = result.ip_address.ip
+                if not quiet:
+                    print(good(f"Container deployed with public IP: {assigned_ip}"))
+                    exposed_port_str = ', '.join([f"{p['port']}/{p['protocol']}" 
+                                                  for p in exposed_ports])
+                    print(good(f"  Exposed ports: {exposed_port_str}"))
 
             for i_num in range(1, instance_number + 1):
                 results[f'{name}-{i_num:02d}'] = True

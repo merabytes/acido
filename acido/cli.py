@@ -106,6 +106,8 @@ fleet_parser.add_argument('--format', dest='output_format', choices=['txt', 'jso
 fleet_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 fleet_parser.add_argument('--rm-when-done', dest='rm_when_done', action='store_true', help='Remove after completion')
 fleet_parser.add_argument('--region', dest='region', action='append', help='Azure region (e.g., westeurope, eastus). Can be specified multiple times for multi-region deployment.')
+fleet_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores per container (default varies by command)')
+fleet_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB per container (default varies by command)')
 
 # Run subcommand (ephemeral single instance with auto-cleanup)
 run_parser = subparsers.add_parser('run', help='Run a single ephemeral container instance with auto-cleanup after specified duration')
@@ -118,6 +120,12 @@ run_parser.add_argument('--format', dest='output_format', choices=['txt', 'json'
 run_parser.add_argument('-q', '--quiet', dest='quiet', action='store_true', help='Quiet mode')
 run_parser.add_argument('--no-cleanup', dest='no_cleanup', action='store_true', help='Skip auto-cleanup after duration')
 run_parser.add_argument('--region', dest='region', action='append', help='Azure region (e.g., westeurope, eastus). Can be specified multiple times.')
+run_parser.add_argument('--bidirectional', dest='bidirectional', action='store_true', 
+                         help='Enable bidirectional connectivity (assigns public IP for inbound connections). Requires --expose-port.')
+run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
+                         help='Port to expose in format PORT:PROTOCOL (e.g., 5060:udp, 8080:tcp). Can be specified multiple times. Requires --bidirectional.')
+run_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores (default: 4)')
+run_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB (default: 16)')
 
 # List subcommand (Docker-like: acido ls)
 ls_parser = subparsers.add_parser('ls', help='List all container instances')
@@ -131,8 +139,10 @@ ip_parser = subparsers.add_parser('ip', help='Manage IPv4 addresses and network 
 ip_subparsers = ip_parser.add_subparsers(dest='ip_subcommand', help='IP management commands')
 
 # IP create subcommand
-ip_create_parser = ip_subparsers.add_parser('create', help='Create a new IPv4 address and network profile')
-ip_create_parser.add_argument('name', help='Name for the IPv4 address and network profile')
+ip_create_parser = ip_subparsers.add_parser('create', help='Create a new IPv4 address (standalone by default, use --with-nat-stack for full NAT Gateway setup)')
+ip_create_parser.add_argument('name', help='Name for the IPv4 address')
+ip_create_parser.add_argument('--with-nat-stack', dest='with_nat_stack', action='store_true', 
+                                help='Create IP with full NAT Gateway stack (VNet, Subnet, NAT Gateway)')
 
 # IP ls subcommand
 ip_ls_parser = ip_subparsers.add_parser('ls', help='List all IPv4 addresses')
@@ -143,6 +153,9 @@ ip_rm_parser.add_argument('name', help='Name of the IPv4 address and network pro
 
 # IP select subcommand
 ip_select_parser = ip_subparsers.add_parser('select', help='Select an IPv4 address to use for containers')
+
+# IP clean subcommand
+ip_clean_parser = ip_subparsers.add_parser('clean', help='Clean IP configuration from local config (removes selected IP from config)')
 
 # Select subcommand
 select_parser = subparsers.add_parser('select', help='Select instances by name/regex')
@@ -318,12 +331,15 @@ if args.subcommand == 'ip':
     if hasattr(args, 'ip_subcommand') and args.ip_subcommand:
         if args.ip_subcommand == 'create':
             args.create_ip = args.name
+            args.with_nat_stack = getattr(args, 'with_nat_stack', False)
         elif args.ip_subcommand == 'ls':
             args.list_ip = True
         elif args.ip_subcommand == 'rm':
             args.remove_ip = args.name
         elif args.ip_subcommand == 'select':
             args.ipv4_address = True
+        elif args.ip_subcommand == 'clean':
+            args.clean_ip = True
 
 instances_outputs = {}
 
@@ -441,8 +457,11 @@ class Acido(object):
 
         if args.create_ip:
             public_ip_name = args.create_ip
-            self.create_ipv4_address(public_ip_name)
-            self.select_ipv4_address()
+            with_nat_stack = getattr(args, 'with_nat_stack', False)
+            self.create_ipv4_address(public_ip_name, with_nat_stack=with_nat_stack)
+            # Only select if NAT stack was created (for backward compatibility)
+            if with_nat_stack:
+                self.select_ipv4_address()
 
         if args.ipv4_address:
             self.select_ipv4_address()
@@ -496,29 +515,40 @@ class Acido(object):
 
         self._save_config()
 
-    def create_ipv4_address(self, public_ip_name):
+    def create_ipv4_address(self, public_ip_name, with_nat_stack=False):
+        """
+        Create a public IP address, optionally with full NAT Gateway stack.
+        
+        Args:
+            public_ip_name (str): Name for the public IP
+            with_nat_stack (bool): If True, create VNet, Subnet, and NAT Gateway
+        """
         if self.network_manager is None:
             print(bad("Network manager is not initialized. Please provide a resource group."))
             return
         
-        # 1) Create the Public IP Address
-        pip_id = self.network_manager.create_ipv4(public_ip_name)
+        # 1) Create the Public IP Address with appropriate tag
+        pip_id = self.network_manager.create_ipv4(public_ip_name, with_nat_stack=with_nat_stack)
 
-        # 2) Create VNet + Subnet with NAT Gateway using that IP
-        vnet_name = f'{public_ip_name}-vnet'
-        subnet_name = f'{public_ip_name}-subnet'
-        self.network_manager.create_virtual_network(vnet_name)
-        subnet = self.network_manager.create_subnet(vnet_name, subnet_name, public_ip_id=pip_id, subnet_cidr="10.0.1.0/24")
+        if with_nat_stack:
+            # 2) Create VNet + Subnet with NAT Gateway using that IP
+            vnet_name = f'{public_ip_name}-vnet'
+            subnet_name = f'{public_ip_name}-subnet'
+            self.network_manager.create_virtual_network(vnet_name)
+            subnet = self.network_manager.create_subnet(vnet_name, subnet_name, public_ip_id=pip_id, subnet_cidr="10.0.1.0/24")
 
-        # 3) Save config (names + IDs)
-        self.public_ip_name = public_ip_name
-        self.public_ip_id = pip_id
-        self.vnet_name = vnet_name
-        self.subnet_name = subnet_name
-        self.subnet_id = subnet.id
+            # 3) Save config (names + IDs)
+            self.public_ip_name = public_ip_name
+            self.public_ip_id = pip_id
+            self.vnet_name = vnet_name
+            self.subnet_name = subnet_name
+            self.subnet_id = subnet.id
 
-        self._save_config()
-        print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
+            self._save_config()
+            print(good(f"Network stack created: {public_ip_name} -> {vnet_name}/{subnet_name} (egress via NAT Gateway)"))
+        else:
+            # Standalone IP - no NAT stack
+            print(good(f"Standalone public IP created: {public_ip_name} (no NAT Gateway stack)"))
 
 
     def select_ipv4_address(self):
@@ -535,15 +565,18 @@ class Acido(object):
             print(info("No IPv4 addresses found."))
             return
         
-        # Create descriptive list
-        ip_descriptions = [f"{info['name']} ({info['ip_address']})" for info in ip_addresses_info]
+        # Create descriptive list with NAT stack indicator
+        ip_descriptions = []
+        for info in ip_addresses_info:
+            nat_indicator = " [with NAT stack]" if info.get('has_nat_stack') else " [standalone]"
+            ip_descriptions.append(f"{info['name']} ({info['ip_address']}){nat_indicator}")
         
         # Interactive selector
         print(good("Please select an IP address:"))
         selected_description = select(ip_descriptions, cursor_style="cyan")
         
         # Extract selected info
-        selected_ip_address = selected_description.split(' ')[-1][1:-1]  # Extract IP from (ip_address)
+        selected_ip_address = selected_description.split('(')[1].split(')')[0]  # Extract IP from (ip_address)
         name = selected_description.split(' ')[0]  # Extract name
         
         chosen = next(x for x in ip_addresses_info if x['name'] == name)
@@ -558,7 +591,10 @@ class Acido(object):
         self.subnet_id = None
         
         self._save_config()
-        print(good(f"You selected IP address: {selected_ip_address} (name: {name})"))
+        
+        # Show NAT stack indicator in confirmation
+        nat_indicator = "[with NAT stack]" if chosen.get('has_nat_stack') else "[standalone]"
+        print(good(f"IP '{name}' {nat_indicator} selected"))
 
     def ls_ip(self, interactive=True):
         """List all IPv4 addresses and network profiles."""
@@ -575,21 +611,34 @@ class Acido(object):
                 print(good("IPv4 addresses:"))
                 for info in ip_addresses_info:
                     ip_addr = info['ip_address'] if info['ip_address'] else 'Pending'
-                    print(f"  {bold(info['name'])}: {green(ip_addr)}")
+                    nat_indicator = " [with NAT stack]" if info.get('has_nat_stack') else " [standalone]"
+                    print(f"  {bold(info['name'])}{nat_indicator}: {green(ip_addr)}")
         
         return None if interactive else ip_addresses_info
 
     def rm_ip(self, name):
-        """Remove IPv4 address and associated network resources (NAT GW, subnet, VNet)."""
+        """Remove IPv4 address and associated network resources."""
         if self.network_manager is None:
             print(bad("Network manager is not initialized. Please provide a resource group."))
             return False
         
         try:
-            # Note: Ensure no container groups are using the subnet before deletion
-            vnet_name = f'{name}-vnet'
-            subnet_name = f'{name}-subnet'
-            self.network_manager.delete_stack(name, vnet_name, subnet_name)
+            # Check if IP has NAT stack by getting its tags
+            try:
+                pip = self.network_manager.get_public_ip(name)
+                has_nat_stack = pip.tags and pip.tags.get('has_nat_stack') == 'true'
+            except:
+                has_nat_stack = False
+                print(orange(f"Warning: Could not determine NAT stack status for {name}, assuming standalone"))
+            
+            if has_nat_stack:
+                # Delete full stack: NAT GW, Subnet, VNet, and Public IP
+                vnet_name = f'{name}-vnet'
+                subnet_name = f'{name}-subnet'
+                self.network_manager.delete_stack(name, vnet_name, subnet_name)
+            else:
+                # Delete only the public IP
+                self.network_manager.delete_public_ip_only(name)
             
             # Clear config if it matches
             if self.public_ip_name == name:
@@ -600,11 +649,25 @@ class Acido(object):
                 self.subnet_id = None
                 self._save_config()
             
-            print(good(f"Successfully removed IPv4 address and network resources: {name}"))
+            print(good(f"Successfully removed IPv4 address: {name}"))
             return True
         except Exception as e:
             print(bad(f"Failed to remove IPv4 address {name}: {str(e)}"))
             return False
+
+    def clean_ip_config(self):
+        """
+        Clean IP configuration from local config.
+        Removes selected IP, vnet, and subnet from config file.
+        """
+        self.public_ip_name = None
+        self.public_ip_id = None
+        self.vnet_name = None
+        self.subnet_name = None
+        self.subnet_id = None
+        
+        self._save_config()
+        print(good("IP configuration cleaned from local config"))
 
     def ls(self, interactive=True):
         all_instances = {}
@@ -634,13 +697,15 @@ class Acido(object):
         print(good(f"Selected all instances of group/s: [ {bold(' '.join(self.selected_instances))} ]"))
         return None if interactive else self.selected_instances
 
-    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, regions=None):
+    def fleet(self, fleet_name, instance_num=3, image_name=None, scan_cmd=None, input_file=None, wait=None, write_to_file=None, output_format='txt', interactive=True, quiet=False, pool=None, regions=None, max_cpu=None, max_ram=None):
         """
         Deploy fleet of containers across multiple regions.
         
         Args:
             regions: List of Azure regions to distribute instances across. If None, defaults to ['westeurope'].
                     Instances are randomly distributed across provided regions.
+            max_cpu: Maximum CPU cores per container (default depends on instance number)
+            max_ram: Maximum RAM in GB per container (default depends on instance number)
         """
         response = {}
         input_files = None
@@ -746,7 +811,9 @@ class Acido(object):
                 subnet_name=self.subnet_name,
                 input_files=input_files,
                 quiet=quiet,
-                location=selected_region)
+                location=selected_region,
+                max_cpu=max_cpu if max_cpu else 16,
+                max_ram=max_ram if max_ram else 16)
         
         os.system('rm -f /tmp/acido-input*')
 
@@ -826,7 +893,9 @@ class Acido(object):
     
     def run(self, name: str, image_name: str, task: str = None, duration: int = 900,
             write_to_file: str = None, output_format: str = 'txt', 
-            quiet: bool = False, cleanup: bool = True, regions=None):
+            quiet: bool = False, cleanup: bool = True, regions=None,
+            bidirectional: bool = False, exposed_ports: list = None,
+            max_cpu: int = 4, max_ram: int = 16):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -898,6 +967,26 @@ class Acido(object):
         response = {}
         outputs = {}
         
+        # Handle bidirectional connectivity
+        public_ip_id = None
+        if bidirectional:
+            if not exposed_ports:
+                print(bad("--bidirectional requires --expose-port to be specified"))
+                raise ValueError("--bidirectional requires --expose-port")
+            
+            # Get the public IP ID if we need bidirectional
+            if self.public_ip_name:
+                try:
+                    pip = self.network_manager.get_public_ip(self.public_ip_name)
+                    public_ip_id = pip.id
+                    print_if_not_quiet(good(f"Using public IP: {self.public_ip_name} for bidirectional connectivity"))
+                except Exception as e:
+                    print(bad(f"Failed to get public IP {self.public_ip_name}: {e}"))
+                    raise
+            else:
+                print(bad("No public IP selected. Please run 'acido ip select' or 'acido ip create' first"))
+                raise ValueError("No public IP selected for bidirectional mode")
+        
         # Deploy the single instance
         print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
         
@@ -911,7 +1000,11 @@ class Acido(object):
             subnet_name=self.subnet_name,
             input_files=None,
             quiet=quiet,
-            location=selected_region
+            location=selected_region,
+            max_cpu=max_cpu,
+            max_ram=max_ram,
+            public_ip_id=public_ip_id,
+            exposed_ports=exposed_ports
         )
         
         print_if_not_quiet(good(f"Successfully created container instance: [ {bold(name)} ]"))
@@ -2205,13 +2298,33 @@ def main():
             output_format=args.output_format,
             interactive=bool(args.interactive),
             quiet=args.quiet,
-            regions=args.region
+            regions=args.region,
+            max_cpu=getattr(args, 'cpu', None),
+            max_ram=getattr(args, 'ram', None)
         )
         if args.rm_when_done:
             acido.rm(args.fleet if args.num_instances <= 10 else f'{args.fleet}*')
     if hasattr(args, 'run_instance') and args.run_instance:
         # Build full image URL from short name or keep full URL
         full_image_url = acido.build_image_url(args.image_name, getattr(args, 'image_tag', 'latest'))
+        
+        # Parse exposed ports if provided
+        exposed_ports = None
+        if hasattr(args, 'expose_ports') and args.expose_ports:
+            from acido.utils.port_utils import parse_port_spec
+            exposed_ports = []
+            for spec in args.expose_ports:
+                try:
+                    exposed_ports.append(parse_port_spec(spec))
+                except ValueError as e:
+                    print(bad(str(e)))
+                    sys.exit(1)
+        
+        # Validate: If bidirectional is set, expose_ports must also be set
+        if getattr(args, 'bidirectional', False) and not exposed_ports:
+            print(bad("--bidirectional requires --expose-port to be specified"))
+            sys.exit(1)
+        
         acido.run(
             name=args.name,
             image_name=full_image_url,
@@ -2221,7 +2334,11 @@ def main():
             output_format=args.output_format,
             quiet=args.quiet,
             cleanup=not args.no_cleanup,
-            regions=args.region
+            regions=args.region,
+            bidirectional=getattr(args, 'bidirectional', False),
+            exposed_ports=exposed_ports,
+            max_cpu=getattr(args, 'cpu', 4),
+            max_ram=getattr(args, 'ram', 16)
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
@@ -2238,6 +2355,11 @@ def main():
         acido.ls_ip(interactive=True)
     if hasattr(args, 'remove_ip') and args.remove_ip:
         acido.rm_ip(args.remove_ip)
+    if hasattr(args, 'clean_ip') and args.clean_ip:
+        acido.clean_ip_config()
+    if args.create_ip:
+        with_nat_stack = getattr(args, 'with_nat_stack', False)
+        acido.create_ipv4_address(args.create_ip, with_nat_stack=with_nat_stack)
     if args.create_image:
         install_pkgs = getattr(args, 'install_packages', None)
         no_update = getattr(args, 'no_update', False)

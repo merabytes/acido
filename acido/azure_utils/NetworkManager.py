@@ -20,12 +20,25 @@ class NetworkManager(ManagedIdentity):
             self._client = NetworkManagementClient(credential, subscription)
             self.subscription_id = subscription
 
-    def create_ipv4(self, public_ip_name):
+    def create_ipv4(self, public_ip_name, with_nat_stack=False):
+        """
+        Create a public IP address, optionally tagged with NAT stack indicator.
+        
+        Args:
+            public_ip_name (str): Name for the public IP
+            with_nat_stack (bool): Whether this IP is part of a NAT Gateway stack
+        
+        Returns:
+            str: Public IP resource ID
+        """
+        tags = {'has_nat_stack': 'true' if with_nat_stack else 'false'}
+        
         params = {
             'location': self.location,
             'public_ip_allocation_method': 'Static',
             'public_ip_address_version': 'IPv4',
             'sku': PublicIPAddressSku(name='Standard', tier="Regional"),
+            'tags': tags
         }
         pip = self._client.public_ip_addresses.begin_create_or_update(
             self.resource_group, public_ip_name, params
@@ -34,11 +47,26 @@ class NetworkManager(ManagedIdentity):
         return pip.id
 
     def list_ipv4(self):
+        """
+        List all public IP addresses with NAT stack indicator.
+        
+        Returns:
+            list: List of dicts with IP information including has_nat_stack tag
+        """
         ips = self._client.public_ip_addresses.list(self.resource_group)
-        return [
-            {'id': ip.id, 'name': ip.name, 'ip_address': ip.ip_address, 'location': ip.location}
-            for ip in ips
-        ]
+        result = []
+        for ip in ips:
+            has_nat_stack = False
+            if ip.tags and ip.tags.get('has_nat_stack') == 'true':
+                has_nat_stack = True
+            result.append({
+                'id': ip.id,
+                'name': ip.name,
+                'ip_address': ip.ip_address,
+                'location': ip.location,
+                'has_nat_stack': has_nat_stack
+            })
+        return result
 
     def create_virtual_network(self, vnet_name, cidr="10.0.0.0/16"):
         vnet = self._client.virtual_networks.begin_create_or_update(
@@ -123,4 +151,43 @@ class NetworkManager(ManagedIdentity):
             print(good(f"Public IP {public_ip_name} not found or already deleted."))
         
         return True
+
+    def get_public_ip(self, name):
+        """
+        Get public IP resource by name.
+        
+        Args:
+            name (str): Name of the public IP resource
+        
+        Returns:
+            PublicIPAddress: Azure public IP resource object
+            
+        Raises:
+            ResourceNotFoundError: If public IP doesn't exist
+        """
+        return self._client.public_ip_addresses.get(
+            self.resource_group, name
+        )
+
+    def delete_public_ip_only(self, public_ip_name):
+        """
+        Delete only the public IP without deleting NAT Gateway stack.
+        Used for standalone IPs (has_nat_stack=false).
+        
+        Args:
+            public_ip_name (str): Name of the public IP to delete
+            
+        Returns:
+            bool: True if deleted successfully
+        """
+        try:
+            print(good(f"Deleting Public IP: {public_ip_name}..."))
+            self._client.public_ip_addresses.begin_delete(
+                self.resource_group, public_ip_name
+            ).result()
+            print(good(f"Public IP {public_ip_name} deleted successfully."))
+            return True
+        except Exception as e:
+            print(good(f"Public IP {public_ip_name} not found or already deleted: {e}"))
+            return False
 
