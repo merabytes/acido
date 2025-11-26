@@ -31,6 +31,8 @@ ACIDO_CREATE_STEPS = 5  # Number of steps in create_acido_image process
 
 # Network constants
 FIREWALL_CONTAINER_SUBNET_NAME = "container-ingress-subnet"  # Default subnet name for containers when using firewall
+FIREWALL_DEFAULT_PRIVATE_IP = "10.0.0.4"  # Default private IP for Azure Firewall
+CONTAINER_DEFAULT_PRIVATE_IP = "10.0.2.4"  # Default private IP for first container in subnet
 
 # List of all supported Azure regions (47 total)
 AZURE_REGIONS = [
@@ -1531,8 +1533,8 @@ class Acido(object):
             # Get firewall private IP for route table
             firewall_private_ip = self.firewall_manager.get_firewall_private_ip(self.firewall_name)
             if not firewall_private_ip:
-                print(bad("Failed to get firewall private IP. Using default 10.0.0.4"))
-                firewall_private_ip = "10.0.0.4"
+                print(bad(f"Failed to get firewall private IP. Using default {FIREWALL_DEFAULT_PRIVATE_IP}"))
+                firewall_private_ip = FIREWALL_DEFAULT_PRIVATE_IP
             
             print_if_not_quiet(info(f"Firewall private IP: {firewall_private_ip}"))
             
@@ -1573,7 +1575,7 @@ class Acido(object):
                 print_if_not_quiet(info("Continuing with container deployment..."))
             
             # 3. Create NAT Rules - one rule per port (all IPs go to same port on container)
-            container_private_ip = "10.0.2.4"  # First container in subnet
+            container_private_ip = CONTAINER_DEFAULT_PRIVATE_IP  # First container in subnet
             for port_spec in exposed_ports:
                 port = port_spec["port"]
                 protocol = port_spec["protocol"]

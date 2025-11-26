@@ -12,7 +12,8 @@ from azure.mgmt.network.models import (
     AzureFirewall, AzureFirewallSku, AzureFirewallSkuName, AzureFirewallSkuTier,
     AzureFirewallIPConfiguration, SubResource, AzureFirewallNatRule,
     AzureFirewallNatRuleCollection, AzureFirewallNetworkRule,
-    AzureFirewallApplicationRule, AzureFirewallNetworkRuleProtocol
+    AzureFirewallApplicationRule, AzureFirewallNetworkRuleProtocol,
+    AzureFirewallNetworkRuleCollection, RouteTable, Route
 )
 from acido.azure_utils.ManagedIdentity import ManagedIdentity
 from huepy import good, bad, orange, info
@@ -436,7 +437,6 @@ class FirewallManager(ManagedIdentity):
             protocol_enums.append(protocol_enum)
         
         # Create Network rule
-        from azure.mgmt.network.models import AzureFirewallNetworkRuleCollection
         network_rule = AzureFirewallNetworkRule(
             name=rule_name,
             description=f"Allow {'/'.join(protocols)} traffic from containers",
@@ -510,8 +510,6 @@ class FirewallManager(ManagedIdentity):
             )
         """
         print(info(f"Creating route table '{route_table_name}' for subnet '{subnet_name}'..."))
-        
-        from azure.mgmt.network.models import RouteTable, Route
         
         # Create route for all traffic (0.0.0.0/0) to go through firewall
         route = Route(

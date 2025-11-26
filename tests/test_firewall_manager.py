@@ -94,18 +94,11 @@ class TestExposeIPFunctionality(unittest.TestCase):
         """Test that --expose-ip requires a configured firewall."""
         # This would be validated in the run() method
         # If no firewall is configured, it should raise ValueError
-        # This is a basic logic test
-        
         has_firewall = False
         expose_ip = True
         
         # Should fail without firewall
-        if expose_ip and not has_firewall:
-            should_raise_error = True
-        else:
-            should_raise_error = False
-        
-        self.assertTrue(should_raise_error, "--expose-ip should require a firewall")
+        self.assertTrue(expose_ip and not has_firewall, "--expose-ip should require a firewall")
     
     def test_expose_ip_requires_expose_port(self):
         """Test that --expose-ip requires --expose-port."""
@@ -113,12 +106,7 @@ class TestExposeIPFunctionality(unittest.TestCase):
         exposed_ports = None
         
         # Should fail without exposed_ports
-        if expose_ip and not exposed_ports:
-            should_raise_error = True
-        else:
-            should_raise_error = False
-        
-        self.assertTrue(should_raise_error, "--expose-ip should require --expose-port")
+        self.assertTrue(expose_ip and not exposed_ports, "--expose-ip should require --expose-port")
     
     def test_automatic_rule_creation_logic(self):
         """Test that automatic rules are created with correct parameters."""
