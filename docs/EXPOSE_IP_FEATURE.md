@@ -14,6 +14,11 @@ When you use `--expose-ip` with `--bidirectional` and `--expose-port`, acido aut
 
 **Important**: `--expose-ip` can be specified multiple times to create NAT rules for multiple public IP addresses. Each IP/port combination creates a separate NAT rule.
 
+**Limitations**:
+- Only IPv4 addresses are supported (IPv6 is not supported)
+- NAT rules allow traffic from any source IP address (`*`) for maximum accessibility
+- For production environments, consider manually configuring source IP restrictions after rules are created
+
 ## Requirements
 
 - **Configured Firewall**: You must have an Azure Firewall configured using `acido firewall create`

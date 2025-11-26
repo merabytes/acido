@@ -342,7 +342,7 @@ def lambda_handler(event, context):
             
             # Validate: If expose_ips, must have exposed_ports
             if expose_ips and not exposed_ports:
-                return build_error_response('expose_ips requires exposed_ports to be specified')
+                return build_error_response('--expose-ip requires --expose-port to be specified')
             
             # Execute run operation
             response, outputs = _execute_run(

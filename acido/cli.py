@@ -1575,6 +1575,9 @@ class Acido(object):
                 print_if_not_quiet(info("Continuing with container deployment..."))
             
             # 3. Create NAT Rules - one rule per IP and port combination
+            # Note: Only IPv4 addresses are supported (IPv6 not supported)
+            # Note: Rules allow traffic from any source IP (*) for maximum accessibility
+            #       Consider restricting source IPs in production for better security
             container_private_ip = CONTAINER_DEFAULT_PRIVATE_IP  # First container in subnet
             
             # Create NAT rules for each IP address specified in expose_ips
@@ -1585,12 +1588,13 @@ class Acido(object):
                     
                     try:
                         # Create unique rule name using IP and port
-                        # Replace dots in IP with dashes for valid rule name
+                        # Replace dots in IPv4 address with dashes for valid rule name
                         ip_safe = expose_ip_addr.replace('.', '-')
                         nat_rule_name = f"{name}-nat-{ip_safe}-{port}-{protocol.lower()}"
                         print_if_not_quiet(info(f"Creating NAT rule: {nat_rule_name}"))
                         
                         # Create DNAT rule: Specified public IP:port -> Container private IP:port
+                        # Source addresses set to "*" (any) for maximum accessibility
                         self.firewall_manager.create_dnat_rule(
                             firewall_name=self.firewall_name,
                             rule_collection_name="acido-auto-nat",
