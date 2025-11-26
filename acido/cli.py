@@ -1480,9 +1480,9 @@ class Acido(object):
         use_subnet = None
         public_ip_id = None
         
-        # Check if firewall is configured (ingress mode)
-        if self.firewall_name and self.firewall_public_ip:
-            # Firewall mode: Use ingress subnet, inject firewall IP as env var
+        # Check if using firewall ingress mode (firewall configured and expose_ip set)
+        if self.firewall_name and self.firewall_public_ip and expose_ip:
+            # Firewall + expose_ip mode: Use ingress subnet, inject firewall IP as env var
             use_vnet = self.ingress_vnet_name
             use_subnet = self.ingress_subnet_name
             env_vars['FIREWALL_PUBLIC_IP'] = self.firewall_public_ip
@@ -1491,8 +1491,8 @@ class Acido(object):
             print_if_not_quiet(info(f"Firewall public IP injected: {self.firewall_public_ip}"))
             print_if_not_quiet(info(f"Container will use private IP in subnet: {use_subnet}"))
             
-        elif bidirectional:
-            # Bidirectional mode: Direct public IP assignment
+        elif bidirectional and not expose_ip:
+            # Bidirectional mode without firewall: Direct public IP assignment
             if not exposed_ports:
                 print(bad("--bidirectional requires --expose-port to be specified"))
                 raise ValueError("--bidirectional requires --expose-port")
@@ -1510,12 +1510,21 @@ class Acido(object):
                 print(bad("No public IP selected. Please run 'acido ip select' or 'acido ip create' first"))
                 raise ValueError("No public IP selected for bidirectional mode")
         
+        elif self.firewall_name and self.firewall_public_ip:
+            # Firewall configured but no expose_ip: Still use firewall ingress for consistency
+            use_vnet = self.ingress_vnet_name
+            use_subnet = self.ingress_subnet_name
+            env_vars['FIREWALL_PUBLIC_IP'] = self.firewall_public_ip
+            env_vars['FIREWALL_NAME'] = self.firewall_name
+            print_if_not_quiet(info(f"Using firewall ingress subnet: {use_subnet}"))
+        
         else:
             # Default mode: Use legacy vnet/subnet if available
             use_vnet = self.vnet_name
             use_subnet = self.subnet_name
         
         # Automatic firewall rule creation when --expose-ip and --bidirectional are set
+        # This is the new mode: firewall-based exposure with automatic rule creation
         if expose_ip and bidirectional and exposed_ports:
             print_if_not_quiet(orange("Creating automatic firewall rules for exposed ports..."))
             
