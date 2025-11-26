@@ -381,3 +381,208 @@ class FirewallManager(ManagedIdentity):
         except Exception as e:
             print(bad(f"Failed to delete DNAT rule: {e}"))
             return False
+    
+    def create_network_rule(self, firewall_name, rule_collection_name, rule_name,
+                           source_addresses, destination_addresses, destination_ports,
+                           protocols):
+        """
+        Create a Network rule to allow outbound traffic from containers.
+        
+        Network rules control outbound traffic from containers through the firewall.
+        
+        Args:
+            firewall_name (str): Name of the Azure Firewall
+            rule_collection_name (str): Name for the Network rule collection
+            rule_name (str): Name for the Network rule
+            source_addresses (list): List of source IP addresses/CIDRs (e.g., ["10.0.2.0/24"])
+            destination_addresses (list): List of destination IP addresses (e.g., ["*"])
+            destination_ports (list): List of destination ports (e.g., ["5060", "5061"])
+            protocols (list): List of protocols - "TCP", "UDP", "Any", or "ICMP"
+            
+        Returns:
+            AzureFirewall: Updated firewall resource
+            
+        Example:
+            # Allow UDP/TCP traffic from container subnet to any destination
+            create_network_rule(
+                firewall_name="myfw",
+                rule_collection_name="container-outbound",
+                rule_name="allow-sip",
+                source_addresses=["10.0.2.0/24"],
+                destination_addresses=["*"],
+                destination_ports=["5060", "5061"],
+                protocols=["UDP", "TCP"]
+            )
+        """
+        print(info(f"Adding Network rule '{rule_name}' to firewall '{firewall_name}'..."))
+        
+        # Get existing firewall
+        firewall = self._client.azure_firewalls.get(
+            self.resource_group, firewall_name
+        )
+        
+        # Map protocol strings to enums
+        protocol_mapping = {
+            "TCP": AzureFirewallNetworkRuleProtocol.TCP,
+            "UDP": AzureFirewallNetworkRuleProtocol.UDP,
+            "ANY": AzureFirewallNetworkRuleProtocol.ANY,
+            "ICMP": AzureFirewallNetworkRuleProtocol.ICMP
+        }
+        protocol_enums = []
+        for protocol in protocols:
+            protocol_enum = protocol_mapping.get(protocol.upper())
+            if not protocol_enum:
+                raise ValueError(f"Invalid protocol: {protocol}. Must be TCP, UDP, Any, or ICMP")
+            protocol_enums.append(protocol_enum)
+        
+        # Create Network rule
+        from azure.mgmt.network.models import AzureFirewallNetworkRuleCollection
+        network_rule = AzureFirewallNetworkRule(
+            name=rule_name,
+            description=f"Allow {'/'.join(protocols)} traffic from containers",
+            source_addresses=source_addresses,
+            destination_addresses=destination_addresses,
+            destination_ports=destination_ports,
+            protocols=protocol_enums
+        )
+        
+        # Check if rule collection exists
+        rule_collection = None
+        for rc in firewall.network_rule_collections or []:
+            if rc.name == rule_collection_name:
+                rule_collection = rc
+                break
+        
+        if rule_collection:
+            # Add rule to existing collection
+            rule_collection.rules.append(network_rule)
+        else:
+            # Create new rule collection
+            rule_collection = AzureFirewallNetworkRuleCollection(
+                name=rule_collection_name,
+                priority=200,  # Different priority from NAT rules
+                action={'type': 'Allow'},
+                rules=[network_rule]
+            )
+            
+            if firewall.network_rule_collections is None:
+                firewall.network_rule_collections = []
+            firewall.network_rule_collections.append(rule_collection)
+        
+        # Update firewall with new rule
+        poller = self._client.azure_firewalls.begin_create_or_update(
+            self.resource_group,
+            firewall_name,
+            firewall
+        )
+        
+        updated_firewall = poller.result()
+        print(good(f"Network rule '{rule_name}' added successfully"))
+        print(info(f"  Source: {', '.join(source_addresses)} → Destination: {', '.join(destination_addresses)}"))
+        print(info(f"  Ports: {', '.join(destination_ports)} ({', '.join(protocols)})"))
+        
+        return updated_firewall
+    
+    def create_route_table(self, route_table_name, vnet_name, subnet_name, 
+                          firewall_private_ip, location='westeurope'):
+        """
+        Create a route table to route container traffic through the firewall.
+        
+        This routes all traffic (0.0.0.0/0) from the container subnet through the
+        Azure Firewall's private IP (virtual appliance).
+        
+        Args:
+            route_table_name (str): Name for the route table
+            vnet_name (str): Virtual Network name
+            subnet_name (str): Subnet name to associate with route table
+            firewall_private_ip (str): Private IP address of the firewall (e.g., "10.0.0.4")
+            location (str): Azure location (default: westeurope)
+            
+        Returns:
+            RouteTable: Created route table resource
+            
+        Example:
+            create_route_table(
+                route_table_name="container-subnet-route",
+                vnet_name="firewall-vnet",
+                subnet_name="container-ingress-subnet",
+                firewall_private_ip="10.0.0.4"
+            )
+        """
+        print(info(f"Creating route table '{route_table_name}' for subnet '{subnet_name}'..."))
+        
+        from azure.mgmt.network.models import RouteTable, Route
+        
+        # Create route for all traffic (0.0.0.0/0) to go through firewall
+        route = Route(
+            name="default-via-firewall",
+            address_prefix="0.0.0.0/0",
+            next_hop_type="VirtualAppliance",
+            next_hop_ip_address=firewall_private_ip
+        )
+        
+        # Create route table with the route
+        route_table_params = RouteTable(
+            location=location,
+            routes=[route],
+            tags={
+                'purpose': 'firewall-routing',
+                'managed-by': 'acido'
+            }
+        )
+        
+        # Create the route table
+        poller = self._client.route_tables.begin_create_or_update(
+            self.resource_group,
+            route_table_name,
+            route_table_params
+        )
+        route_table = poller.result()
+        print(good(f"Route table '{route_table_name}' created"))
+        print(info(f"  Route: 0.0.0.0/0 → {firewall_private_ip} (VirtualAppliance)"))
+        
+        # Associate route table with subnet
+        try:
+            print(info(f"Associating route table with subnet '{subnet_name}'..."))
+            subnet = self._client.subnets.get(self.resource_group, vnet_name, subnet_name)
+            subnet.route_table = SubResource(id=route_table.id)
+            
+            poller = self._client.subnets.begin_create_or_update(
+                self.resource_group,
+                vnet_name,
+                subnet_name,
+                subnet
+            )
+            poller.result()
+            print(good(f"Route table associated with subnet '{subnet_name}'"))
+        except Exception as e:
+            print(orange(f"Warning: Could not associate route table with subnet: {e}"))
+            print(info("You may need to associate it manually"))
+        
+        return route_table
+    
+    def get_firewall_private_ip(self, firewall_name):
+        """
+        Get the private IP address of an Azure Firewall.
+        
+        Args:
+            firewall_name (str): Name of the Azure Firewall
+            
+        Returns:
+            str: Private IP address (e.g., "10.0.0.4") or None if not found
+        """
+        try:
+            firewall = self._client.azure_firewalls.get(
+                self.resource_group, firewall_name
+            )
+            
+            if firewall.ip_configurations:
+                # Get private IP from first IP configuration
+                ip_config = firewall.ip_configurations[0]
+                if hasattr(ip_config, 'private_ip_address') and ip_config.private_ip_address:
+                    return ip_config.private_ip_address
+            
+            return None
+        except Exception as e:
+            print(bad(f"Failed to get firewall private IP: {e}"))
+            return None

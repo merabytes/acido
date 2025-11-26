@@ -168,6 +168,8 @@ run_parser.add_argument('--bidirectional', dest='bidirectional', action='store_t
                          help='Enable bidirectional connectivity (assigns public IP for inbound connections). Requires --expose-port.')
 run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
                          help='Port(s) to expose in format PORT:PROTOCOL or PORT_START-PORT_END:PROTOCOL (e.g., 5060:udp, 8080:tcp, 5060-5070:udp for range). Can be specified multiple times. Requires --bidirectional or firewall configured.')
+run_parser.add_argument('--expose-ip', dest='expose_ip', action='store_true',
+                         help='Expose container via firewall with automatic NAT and network rules. Requires configured firewall and --expose-port.')
 run_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores (default: 4)')
 run_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB (default: 16)')
 run_parser.add_argument('-e', '--env', dest='env_vars', action='append',
@@ -1382,7 +1384,7 @@ class Acido(object):
             quiet: bool = False, cleanup: bool = True, regions=None,
             bidirectional: bool = False, exposed_ports: list = None,
             max_cpu: int = 4, max_ram: int = 16, custom_env_vars: dict = None,
-            entrypoint: str = None):
+            entrypoint: str = None, expose_ip: bool = False):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -1402,6 +1404,7 @@ class Acido(object):
             cleanup: Whether to auto-cleanup after duration (default: True)
             regions: List of Azure regions to select from. If None, defaults to ['westeurope'].
             entrypoint: Override container entrypoint (optional - if not provided, uses image default ENTRYPOINT)
+            expose_ip: Expose container via firewall with automatic NAT and network rules (requires firewall and --expose-port)
         
         Returns:
             tuple: (response dict, outputs dict) or None if interactive mode
@@ -1459,6 +1462,19 @@ class Acido(object):
         response = {}
         outputs = {}
         
+        # Validate --expose-ip requirements
+        if expose_ip:
+            # --expose-ip requires a configured firewall
+            if not self.firewall_name or not self.firewall_public_ip:
+                print(bad("--expose-ip requires a configured firewall"))
+                print(info("Please create and configure a firewall first using 'acido firewall create'"))
+                raise ValueError("--expose-ip requires a configured firewall")
+            
+            # --expose-ip requires --expose-port
+            if not exposed_ports:
+                print(bad("--expose-ip requires --expose-port to be specified"))
+                raise ValueError("--expose-ip requires --expose-port")
+        
         # Determine subnet configuration based on firewall or bidirectional mode
         use_vnet = None
         use_subnet = None
@@ -1498,6 +1514,83 @@ class Acido(object):
             # Default mode: Use legacy vnet/subnet if available
             use_vnet = self.vnet_name
             use_subnet = self.subnet_name
+        
+        # Automatic firewall rule creation when --expose-ip and --bidirectional are set
+        if expose_ip and bidirectional and exposed_ports:
+            print_if_not_quiet(orange("Creating automatic firewall rules for exposed ports..."))
+            
+            # Get firewall private IP for route table
+            firewall_private_ip = self.firewall_manager.get_firewall_private_ip(self.firewall_name)
+            if not firewall_private_ip:
+                print(bad("Failed to get firewall private IP. Using default 10.0.0.4"))
+                firewall_private_ip = "10.0.0.4"
+            
+            print_if_not_quiet(info(f"Firewall private IP: {firewall_private_ip}"))
+            
+            # 1. Create route table for container subnet (0.0.0.0/0 -> firewall)
+            try:
+                route_table_name = f"{use_subnet}-route-table"
+                print_if_not_quiet(info(f"Creating route table: {route_table_name}"))
+                self.firewall_manager.create_route_table(
+                    route_table_name=route_table_name,
+                    vnet_name=use_vnet,
+                    subnet_name=use_subnet,
+                    firewall_private_ip=firewall_private_ip,
+                    location=selected_region
+                )
+            except Exception as e:
+                # Route table might already exist, continue
+                print_if_not_quiet(orange(f"Route table creation skipped (may already exist): {e}"))
+            
+            # 2. Create Network Rule for outbound traffic from containers
+            # Collect all ports from exposed_ports
+            port_numbers = [str(p["port"]) for p in exposed_ports]
+            protocols = list(set([p["protocol"] for p in exposed_ports]))  # Unique protocols
+            
+            try:
+                network_rule_name = f"{name}-outbound-rule"
+                print_if_not_quiet(info(f"Creating network rule: {network_rule_name}"))
+                self.firewall_manager.create_network_rule(
+                    firewall_name=self.firewall_name,
+                    rule_collection_name="acido-container-outbound",
+                    rule_name=network_rule_name,
+                    source_addresses=["10.0.2.0/24"],  # Container subnet
+                    destination_addresses=["*"],  # Allow to any destination
+                    destination_ports=port_numbers,
+                    protocols=protocols
+                )
+            except Exception as e:
+                print_if_not_quiet(orange(f"Network rule creation failed: {e}"))
+                print_if_not_quiet(info("Continuing with container deployment..."))
+            
+            # 3. Create NAT Rules - one rule per port (all IPs go to same port on container)
+            container_private_ip = "10.0.2.4"  # First container in subnet
+            for port_spec in exposed_ports:
+                port = port_spec["port"]
+                protocol = port_spec["protocol"]
+                
+                try:
+                    nat_rule_name = f"{name}-nat-{port}-{protocol.lower()}"
+                    print_if_not_quiet(info(f"Creating NAT rule: {nat_rule_name}"))
+                    
+                    # Create DNAT rule: Firewall public IP:port -> Container private IP:port
+                    self.firewall_manager.create_dnat_rule(
+                        firewall_name=self.firewall_name,
+                        rule_collection_name="acido-auto-nat",
+                        rule_name=nat_rule_name,
+                        source_addresses=["*"],  # Allow from any source IP
+                        destination_address=self.firewall_public_ip,
+                        destination_port=str(port),
+                        translated_address=container_private_ip,
+                        translated_port=str(port),
+                        protocol=protocol
+                    )
+                except Exception as e:
+                    print_if_not_quiet(orange(f"NAT rule creation failed for port {port}/{protocol}: {e}"))
+                    print_if_not_quiet(info("Continuing with next rule..."))
+            
+            print_if_not_quiet(good("Firewall rules created successfully"))
+            print_if_not_quiet(info(f"Container will be accessible at {self.firewall_public_ip} on ports: {', '.join([f'{p['port']}/{p['protocol']}' for p in exposed_ports])}"))
         
         # Deploy the single instance
         print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
@@ -2886,7 +2979,8 @@ def main():
             max_cpu=getattr(args, 'cpu', 4),
             max_ram=getattr(args, 'ram', 16),
             custom_env_vars=custom_env_vars,
-            entrypoint=entrypoint
+            entrypoint=entrypoint,
+            expose_ip=getattr(args, 'expose_ip', False)
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
