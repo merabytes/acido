@@ -95,30 +95,40 @@ class TestExposeIPFunctionality(unittest.TestCase):
         # This would be validated in the run() method
         # If no firewall is configured, it should raise ValueError
         has_firewall = False
-        expose_ip = True
+        expose_ips = ["1.2.3.4"]
         
         # Should fail without firewall
-        self.assertTrue(expose_ip and not has_firewall, "--expose-ip should require a firewall")
+        self.assertTrue(expose_ips and not has_firewall, "--expose-ip should require a firewall")
     
     def test_expose_ip_requires_expose_port(self):
         """Test that --expose-ip requires --expose-port."""
-        expose_ip = True
+        expose_ips = ["1.2.3.4"]
         exposed_ports = None
         
         # Should fail without exposed_ports
-        self.assertTrue(expose_ip and not exposed_ports, "--expose-ip should require --expose-port")
+        self.assertTrue(expose_ips and not exposed_ports, "--expose-ip should require --expose-port")
     
     def test_automatic_rule_creation_logic(self):
         """Test that automatic rules are created with correct parameters."""
-        # When expose_ip and bidirectional are both true, automatic rules should be created
-        expose_ip = True
+        # When expose_ips and bidirectional are both true, automatic rules should be created
+        expose_ips = ["1.2.3.4", "5.6.7.8"]
         bidirectional = True
         exposed_ports = [{"port": 5060, "protocol": "UDP"}]
         
-        should_create_rules = expose_ip and bidirectional and exposed_ports
+        should_create_rules = expose_ips and bidirectional and exposed_ports
         
         self.assertTrue(should_create_rules, 
-                       "Should create automatic rules when expose_ip and bidirectional are set")
+                       "Should create automatic rules when expose_ips and bidirectional are set")
+    
+    def test_multiple_ips_multiple_ports(self):
+        """Test that NAT rules are created for each IP/port combination."""
+        expose_ips = ["1.2.3.4", "5.6.7.8"]
+        exposed_ports = [{"port": 5060, "protocol": "UDP"}, {"port": 8080, "protocol": "TCP"}]
+        
+        # Should create 2 IPs * 2 ports = 4 NAT rules
+        expected_rule_count = len(expose_ips) * len(exposed_ports)
+        
+        self.assertEqual(expected_rule_count, 4, "Should create one NAT rule per IP/port combination")
     
     def test_route_table_default_values(self):
         """Test that route table uses correct default values."""

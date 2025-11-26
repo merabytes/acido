@@ -10,31 +10,56 @@ When you use `--expose-ip` with `--bidirectional` and `--expose-port`, acido aut
 
 1. **Route Table**: Routes all traffic (0.0.0.0/0) from the container subnet through the Azure Firewall
 2. **Network Rules**: Allows outbound traffic from containers (10.0.2.0/24) to any destination
-3. **NAT Rules**: Creates DNAT rules to forward traffic from the firewall's public IP to the container's private IP
+3. **NAT Rules**: Creates DNAT rules to forward traffic from the specified public IP addresses to the container's private IP
+
+**Important**: `--expose-ip` can be specified multiple times to create NAT rules for multiple public IP addresses. Each IP/port combination creates a separate NAT rule.
 
 ## Requirements
 
 - **Configured Firewall**: You must have an Azure Firewall configured using `acido firewall create`
 - **--expose-port**: You must specify at least one port to expose
 - **--bidirectional**: You must use the bidirectional flag to enable this mode
+- **--expose-ip**: Specify one or more public IP addresses
 
 ## Usage
 
-### Basic Example
+### Basic Example (Single IP)
 
 ```bash
 # Create a firewall first (one-time setup)
 acido firewall create my-firewall --vnet my-vnet --public-ip my-firewall-ip
 
-# Run a container with automatic firewall rules
+# Run a container with automatic firewall rules for a single public IP
 acido run voip-server \
   --image asterisk \
   --bidirectional \
-  --expose-ip \
+  --expose-ip 20.50.100.1 \
   --expose-port 5060:udp \
   --expose-port 5060:tcp \
   --duration 3600
 ```
+
+### Multiple IP Addresses
+
+You can expose the same container on multiple public IPs by specifying `--expose-ip` multiple times:
+
+```bash
+# Expose container on two different public IPs
+acido run multi-ip-service \
+  --image nginx \
+  --bidirectional \
+  --expose-ip 20.50.100.1 \
+  --expose-ip 20.50.100.2 \
+  --expose-port 80:tcp \
+  --expose-port 443:tcp \
+  --duration 7200
+```
+
+This creates NAT rules for:
+- `20.50.100.1:80` → container:80 (TCP)
+- `20.50.100.1:443` → container:443 (TCP)
+- `20.50.100.2:80` → container:80 (TCP)
+- `20.50.100.2:443` → container:443 (TCP)
 
 ### What Happens Behind the Scenes
 
@@ -51,15 +76,17 @@ acido run voip-server \
    - Ports: All ports specified in --expose-port
    - Protocols: All protocols specified in --expose-port
 
-3. **NAT Rule Creation** (one per port):
+3. **NAT Rule Creation** (one per IP/port combination):
    - Collection: `acido-auto-nat`
-   - Rule Name: `<container-name>-nat-<port>-<protocol>`
+   - Rule Name: `<container-name>-nat-<ip-address>-<port>-<protocol>` (IP dots replaced with dashes)
    - Source: `*` (any source IP)
-   - Destination: Firewall Public IP
+   - Destination: Specified public IP address from --expose-ip
    - Destination Port: The exposed port
    - Translated Address: `10.0.2.4` (first container in subnet)
    - Translated Port: Same as destination port
    - Protocol: TCP, UDP, or both
+
+**Note**: With multiple IPs and multiple ports, the number of NAT rules created = (number of IPs) × (number of ports)
 
 ## Multiple Ports Example
 
@@ -67,7 +94,7 @@ acido run voip-server \
 acido run web-server \
   --image nginx \
   --bidirectional \
-  --expose-ip \
+  --expose-ip 20.50.100.1 \
   --expose-port 80:tcp \
   --expose-port 443:tcp \
   --expose-port 8080:tcp \
@@ -77,17 +104,18 @@ acido run web-server \
 This creates:
 - 1 route table
 - 1 network rule (with ports 80, 443, 8080)
-- 3 NAT rules (one for each port)
+- 3 NAT rules (one for each port on the single IP)
 
 ## Port Ranges
 
-You can also specify port ranges:
+You can also specify port ranges and multiple IPs:
 
 ```bash
 acido run game-server \
   --image game-image \
   --bidirectional \
-  --expose-ip \
+  --expose-ip 20.50.100.1 \
+  --expose-ip 20.50.100.2 \
   --expose-port 25565:tcp \
   --expose-port 10000-10099:udp \
   --duration 86400
@@ -96,22 +124,19 @@ acido run game-server \
 This creates:
 - 1 route table
 - 1 network rule (with ports 25565 and 10000-10099)
-- 101 NAT rules (1 for TCP port 25565, 100 for UDP ports 10000-10099)
+- 202 NAT rules (2 IPs × 101 ports: 1 TCP + 100 UDP per IP)
 
 ## Accessing Your Container
 
-After the container is created, you can access it using the firewall's public IP:
+After the container is created, you can access it using the specified public IPs:
 
 ```bash
-# Get firewall public IP
-acido firewall ls
-
-# Access your service
-# For VoIP example:
-sip:user@<firewall-public-ip>:5060
+# For VoIP example with IP 20.50.100.1:
+sip:user@20.50.100.1:5060
 
 # For web server example:
-http://<firewall-public-ip>:80
+http://20.50.100.1:80
+http://20.50.100.2:80
 ```
 
 ## Error Scenarios
@@ -119,7 +144,7 @@ http://<firewall-public-ip>:80
 ### No Firewall Configured
 
 ```bash
-acido run test --expose-ip --expose-port 80:tcp
+acido run test --expose-ip 20.50.100.1 --expose-port 80:tcp
 ```
 
 **Error**: `--expose-ip requires a configured firewall`
@@ -129,7 +154,7 @@ acido run test --expose-ip --expose-port 80:tcp
 ### Missing --expose-port
 
 ```bash
-acido run test --bidirectional --expose-ip
+acido run test --bidirectional --expose-ip 20.50.100.1
 ```
 
 **Error**: `--expose-ip requires --expose-port to be specified`
@@ -263,7 +288,7 @@ acido firewall delete-rule my-firewall \
 
 ## Lambda/API Usage
 
-The `--expose-ip` flag is also supported via Lambda handler:
+The `--expose-ip` flag is also supported via Lambda handler. You can specify multiple IPs:
 
 ```json
 {
@@ -271,13 +296,16 @@ The `--expose-ip` flag is also supported via Lambda handler:
   "name": "api-server",
   "image": "api-image",
   "bidirectional": true,
-  "expose_ip": true,
+  "expose_ips": ["20.50.100.1", "20.50.100.2"],
   "exposed_ports": [
-    {"port": 8080, "protocol": "TCP"}
+    {"port": 8080, "protocol": "TCP"},
+    {"port": 8443, "protocol": "TCP"}
   ],
   "duration": 900
 }
 ```
+
+This creates 4 NAT rules (2 IPs × 2 ports).
 
 ## Best Practices
 

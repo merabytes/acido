@@ -291,10 +291,12 @@ acido run ssh-bastion \
   -d 3600  # Auto-cleanup after 1 hour
 
 # 5. Deploy with automatic firewall rules (requires configured firewall)
+# Specify multiple public IPs to create NAT rules for each IP/port combination
 acido run api-server \
   -im nginx:latest \
   --bidirectional \
-  --expose-ip \
+  --expose-ip 20.50.100.1 \
+  --expose-ip 20.50.100.2 \
   --expose-port 80:tcp \
   --expose-port 443:tcp \
   -d 7200
@@ -311,9 +313,10 @@ acido fleet scan -n 10 -im nmap \
 - The `--expose-port` format is `PORT:PROTOCOL` or `PORT_START-PORT_END:PROTOCOL` (e.g., `5060:udp`, `8080:tcp`, `10000-10099:udp` for ranges)
 - Port ranges are expanded automatically (max 100 ports per range)
 - Multiple ports can be exposed by repeating `--expose-port`
-- **NEW**: `--expose-ip` flag with `--bidirectional` enables automatic Azure Firewall rule creation (requires configured firewall)
-  - Automatically creates route tables, network rules, and NAT rules
-  - Container is accessible via firewall public IP
+- **NEW**: `--expose-ip <ip-address>` flag with `--bidirectional` enables automatic Azure Firewall rule creation (requires configured firewall)
+  - Can be specified multiple times for multiple public IP addresses
+  - Automatically creates route tables, network rules, and NAT rules for each IP/port combination
+  - Container is accessible via the specified public IPs
   - See [EXPOSE_IP_FEATURE.md](docs/EXPOSE_IP_FEATURE.md) for complete documentation
 - Container IP is printed after deployment for easy access
 - Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)

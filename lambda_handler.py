@@ -88,7 +88,7 @@ def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_fil
 
 
 def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None, 
-                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16, entrypoint=None, expose_ip=False):
+                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16, entrypoint=None, expose_ips=None):
     """Execute run operation (single ephemeral instance) and return response and outputs."""
     full_image_url = acido.build_image_url(image_name)
     
@@ -107,7 +107,7 @@ def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None,
         max_cpu=max_cpu,
         max_ram=max_ram,
         entrypoint=entrypoint,
-        expose_ip=expose_ip
+        expose_ips=expose_ips
     )
 
 
@@ -332,7 +332,7 @@ def lambda_handler(event, context):
             # New parameters for port forwarding
             bidirectional = event.get('bidirectional', False)
             exposed_ports = event.get('exposed_ports', None)  # List of {"port": 5060, "protocol": "UDP"}
-            expose_ip = event.get('expose_ip', False)
+            expose_ips = event.get('expose_ips', None)  # List of IP addresses
             max_cpu = event.get('max_cpu', event.get('cpu', 4))
             max_ram = event.get('max_ram', event.get('ram', 16))
             
@@ -340,14 +340,14 @@ def lambda_handler(event, context):
             if bidirectional and not exposed_ports:
                 return build_error_response('bidirectional requires exposed_ports to be specified')
             
-            # Validate: If expose_ip, must have exposed_ports
-            if expose_ip and not exposed_ports:
-                return build_error_response('expose_ip requires exposed_ports to be specified')
+            # Validate: If expose_ips, must have exposed_ports
+            if expose_ips and not exposed_ports:
+                return build_error_response('expose_ips requires exposed_ports to be specified')
             
             # Execute run operation
             response, outputs = _execute_run(
                 acido, name, image_name, task, duration, cleanup, regions,
-                bidirectional, exposed_ports, max_cpu, max_ram, entrypoint, expose_ip
+                bidirectional, exposed_ports, max_cpu, max_ram, entrypoint, expose_ips
             )
             
             # Return successful response
@@ -360,7 +360,7 @@ def lambda_handler(event, context):
                 'regions': regions,
                 'bidirectional': bidirectional,
                 'exposed_ports': exposed_ports if exposed_ports else [],
-                'expose_ip': expose_ip,
+                'expose_ips': expose_ips if expose_ips else [],
                 'outputs': outputs
             })
         

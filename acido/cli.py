@@ -170,8 +170,8 @@ run_parser.add_argument('--bidirectional', dest='bidirectional', action='store_t
                          help='Enable bidirectional connectivity (assigns public IP for inbound connections). Requires --expose-port.')
 run_parser.add_argument('--expose-port', dest='expose_ports', action='append',
                          help='Port(s) to expose in format PORT:PROTOCOL or PORT_START-PORT_END:PROTOCOL (e.g., 5060:udp, 8080:tcp, 5060-5070:udp for range). Can be specified multiple times. Requires --bidirectional or firewall configured.')
-run_parser.add_argument('--expose-ip', dest='expose_ip', action='store_true',
-                         help='Expose container via firewall with automatic NAT and network rules. Requires configured firewall and --expose-port.')
+run_parser.add_argument('--expose-ip', dest='expose_ips', action='append',
+                         help='Public IP address(es) to expose container via firewall. Creates NAT rules for each IP/port combination. Can be specified multiple times. Requires configured firewall and --expose-port.')
 run_parser.add_argument('--cpu', dest='cpu', type=int, help='CPU cores (default: 4)')
 run_parser.add_argument('--ram', dest='ram', type=int, help='RAM in GB (default: 16)')
 run_parser.add_argument('-e', '--env', dest='env_vars', action='append',
@@ -1386,7 +1386,7 @@ class Acido(object):
             quiet: bool = False, cleanup: bool = True, regions=None,
             bidirectional: bool = False, exposed_ports: list = None,
             max_cpu: int = 4, max_ram: int = 16, custom_env_vars: dict = None,
-            entrypoint: str = None, expose_ip: bool = False):
+            entrypoint: str = None, expose_ips: list = None):
         """
         Run a single ephemeral container instance with auto-cleanup after specified duration.
         
@@ -1406,7 +1406,7 @@ class Acido(object):
             cleanup: Whether to auto-cleanup after duration (default: True)
             regions: List of Azure regions to select from. If None, defaults to ['westeurope'].
             entrypoint: Override container entrypoint (optional - if not provided, uses image default ENTRYPOINT)
-            expose_ip: Expose container via firewall with automatic NAT and network rules (requires firewall and --expose-port)
+            expose_ips: List of public IP addresses to expose container via firewall with automatic NAT and network rules (requires firewall and --expose-port)
         
         Returns:
             tuple: (response dict, outputs dict) or None if interactive mode
@@ -1465,7 +1465,7 @@ class Acido(object):
         outputs = {}
         
         # Validate --expose-ip requirements
-        if expose_ip:
+        if expose_ips:
             # --expose-ip requires a configured firewall
             if not self.firewall_name or not self.firewall_public_ip:
                 print(bad("--expose-ip requires a configured firewall"))
@@ -1482,9 +1482,9 @@ class Acido(object):
         use_subnet = None
         public_ip_id = None
         
-        # Check if using firewall ingress mode (firewall configured and expose_ip set)
-        if self.firewall_name and self.firewall_public_ip and expose_ip:
-            # Firewall + expose_ip mode: Use ingress subnet, inject firewall IP as env var
+        # Check if using firewall ingress mode (firewall configured and expose_ips set)
+        if self.firewall_name and self.firewall_public_ip and expose_ips:
+            # Firewall + expose_ips mode: Use ingress subnet, inject firewall IP as env var
             use_vnet = self.ingress_vnet_name
             use_subnet = self.ingress_subnet_name
             env_vars['FIREWALL_PUBLIC_IP'] = self.firewall_public_ip
@@ -1493,7 +1493,7 @@ class Acido(object):
             print_if_not_quiet(info(f"Firewall public IP injected: {self.firewall_public_ip}"))
             print_if_not_quiet(info(f"Container will use private IP in subnet: {use_subnet}"))
             
-        elif bidirectional and not expose_ip:
+        elif bidirectional and not expose_ips:
             # Bidirectional mode without firewall: Direct public IP assignment
             if not exposed_ports:
                 print(bad("--bidirectional requires --expose-port to be specified"))
@@ -1513,7 +1513,7 @@ class Acido(object):
                 raise ValueError("No public IP selected for bidirectional mode")
         
         elif self.firewall_name and self.firewall_public_ip:
-            # Firewall configured but no expose_ip: Still use firewall ingress for consistency
+            # Firewall configured but no expose_ips: Still use firewall ingress for consistency
             use_vnet = self.ingress_vnet_name
             use_subnet = self.ingress_subnet_name
             env_vars['FIREWALL_PUBLIC_IP'] = self.firewall_public_ip
@@ -1527,7 +1527,7 @@ class Acido(object):
         
         # Automatic firewall rule creation when --expose-ip and --bidirectional are set
         # This is the new mode: firewall-based exposure with automatic rule creation
-        if expose_ip and bidirectional and exposed_ports:
+        if expose_ips and bidirectional and exposed_ports:
             print_if_not_quiet(orange("Creating automatic firewall rules for exposed ports..."))
             
             # Get firewall private IP for route table
@@ -1574,34 +1574,42 @@ class Acido(object):
                 print_if_not_quiet(orange(f"Network rule creation failed: {e}"))
                 print_if_not_quiet(info("Continuing with container deployment..."))
             
-            # 3. Create NAT Rules - one rule per port (all IPs go to same port on container)
+            # 3. Create NAT Rules - one rule per IP and port combination
             container_private_ip = CONTAINER_DEFAULT_PRIVATE_IP  # First container in subnet
-            for port_spec in exposed_ports:
-                port = port_spec["port"]
-                protocol = port_spec["protocol"]
-                
-                try:
-                    nat_rule_name = f"{name}-nat-{port}-{protocol.lower()}"
-                    print_if_not_quiet(info(f"Creating NAT rule: {nat_rule_name}"))
+            
+            # Create NAT rules for each IP address specified in expose_ips
+            for expose_ip_addr in expose_ips:
+                for port_spec in exposed_ports:
+                    port = port_spec["port"]
+                    protocol = port_spec["protocol"]
                     
-                    # Create DNAT rule: Firewall public IP:port -> Container private IP:port
-                    self.firewall_manager.create_dnat_rule(
-                        firewall_name=self.firewall_name,
-                        rule_collection_name="acido-auto-nat",
-                        rule_name=nat_rule_name,
-                        source_addresses=["*"],  # Allow from any source IP
-                        destination_address=self.firewall_public_ip,
-                        destination_port=str(port),
-                        translated_address=container_private_ip,
-                        translated_port=str(port),
-                        protocol=protocol
-                    )
-                except Exception as e:
-                    print_if_not_quiet(orange(f"NAT rule creation failed for port {port}/{protocol}: {e}"))
-                    print_if_not_quiet(info("Continuing with next rule..."))
+                    try:
+                        # Create unique rule name using IP and port
+                        # Replace dots in IP with dashes for valid rule name
+                        ip_safe = expose_ip_addr.replace('.', '-')
+                        nat_rule_name = f"{name}-nat-{ip_safe}-{port}-{protocol.lower()}"
+                        print_if_not_quiet(info(f"Creating NAT rule: {nat_rule_name}"))
+                        
+                        # Create DNAT rule: Specified public IP:port -> Container private IP:port
+                        self.firewall_manager.create_dnat_rule(
+                            firewall_name=self.firewall_name,
+                            rule_collection_name="acido-auto-nat",
+                            rule_name=nat_rule_name,
+                            source_addresses=["*"],  # Allow from any source IP
+                            destination_address=expose_ip_addr,
+                            destination_port=str(port),
+                            translated_address=container_private_ip,
+                            translated_port=str(port),
+                            protocol=protocol
+                        )
+                    except Exception as e:
+                        print_if_not_quiet(orange(f"NAT rule creation failed for {expose_ip_addr}:{port}/{protocol}: {e}"))
+                        print_if_not_quiet(info("Continuing with next rule..."))
             
             print_if_not_quiet(good("Firewall rules created successfully"))
-            print_if_not_quiet(info(f"Container will be accessible at {self.firewall_public_ip} on ports: {', '.join([f'{p['port']}/{p['protocol']}' for p in exposed_ports])}"))
+            # Show all IP/port combinations
+            ip_port_combos = [f"{ip}:{p['port']}/{p['protocol']}" for ip in expose_ips for p in exposed_ports]
+            print_if_not_quiet(info(f"Container will be accessible at: {', '.join(ip_port_combos)}"))
         
         # Deploy the single instance
         print_if_not_quiet(good(f"Creating container instance: {bold(name)}"))
@@ -2991,7 +2999,7 @@ def main():
             max_ram=getattr(args, 'ram', 16),
             custom_env_vars=custom_env_vars,
             entrypoint=entrypoint,
-            expose_ip=getattr(args, 'expose_ip', False)
+            expose_ips=getattr(args, 'expose_ips', None)
         )
     if args.select:
         acido.select(selection=args.select, interactive=bool(args.interactive))
