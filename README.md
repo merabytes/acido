@@ -291,17 +291,24 @@ acido run ssh-bastion \
   -d 3600  # Auto-cleanup after 1 hour
 
 # 5. Deploy with automatic firewall rules (requires configured firewall)
-# Specify multiple public IPs to create NAT rules for each IP/port combination
+# Restrict access to specific source IPs
 acido run api-server \
   -im nginx:latest \
   --bidirectional \
-  --expose-ip 20.50.100.1 \
-  --expose-ip 20.50.100.2 \
+  --expose-ip 192.168.1.100 \
+  --expose-ip 192.168.1.101 \
   --expose-port 80:tcp \
   --expose-port 443:tcp \
   -d 7200
 
-# 6. Custom resource allocation for fleet (no bidirectional support)
+# 6. DMZ mode - allow all traffic on all ports
+acido run dmz-server \
+  -im myserver \
+  --bidirectional \
+  --dmz \
+  -d 86400
+
+# 7. Custom resource allocation for fleet (no bidirectional support)
 acido fleet scan -n 10 -im nmap \
   -t 'nmap -iL input' -i targets.txt \
   --cpu 8 --ram 16
@@ -313,11 +320,14 @@ acido fleet scan -n 10 -im nmap \
 - The `--expose-port` format is `PORT:PROTOCOL` or `PORT_START-PORT_END:PROTOCOL` (e.g., `5060:udp`, `8080:tcp`, `10000-10099:udp` for ranges)
 - Port ranges are expanded automatically (max 100 ports per range)
 - Multiple ports can be exposed by repeating `--expose-port`
-- **NEW**: `--expose-ip <ip-address>` flag with `--bidirectional` enables automatic Azure Firewall rule creation (requires configured firewall)
-  - Can be specified multiple times for multiple public IP addresses
-  - Automatically creates route tables, network rules, and NAT rules for each IP/port combination
-  - Container is accessible via the specified public IPs
+- **NEW**: `--expose-ip <source-ip>` flag with `--bidirectional` enables automatic Azure Firewall rule creation with source IP filtering
+  - Specifies **source IP addresses** allowed to access container through firewall
+  - Can be specified multiple times for multiple source IPs
+  - NAT rules use firewall's public IP as destination, translate to container at 10.0.2.4
   - See [EXPOSE_IP_FEATURE.md](docs/EXPOSE_IP_FEATURE.md) for complete documentation
+- **NEW**: `--dmz` flag allows all traffic on all ports to container (requires firewall)
+  - Mutually exclusive with --expose-ip
+  - Creates single NAT rule for unrestricted access
 - Container IP is printed after deployment for easy access
 - Use `--cpu` and `--ram` to configure container resources (works for both run and fleet)
   - Default for `acido run`: 4 CPU cores, 16 GB RAM (when not specified)

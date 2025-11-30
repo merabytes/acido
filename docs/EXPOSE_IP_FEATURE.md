@@ -1,70 +1,103 @@
-# Automatic Firewall Rule Creation with --expose-ip
+# Automatic Firewall Rule Creation with --expose-ip and --dmz
 
 ## Overview
 
-The `--expose-ip` flag enables automatic creation of Azure Firewall rules when running containers with `acido run`. This feature eliminates the need to manually configure firewall rules using `acido firewall add-rule` commands.
+The `--expose-ip` and `--dmz` flags enable automatic creation of Azure Firewall rules when running containers with `acido run`. This feature eliminates the need to manually configure firewall rules using `acido firewall add-rule` commands.
 
 ## What Does It Do?
 
-When you use `--expose-ip` with `--bidirectional` and `--expose-port`, acido automatically creates:
+When you use `--expose-ip` or `--dmz` with `--bidirectional` and `--expose-port`, acido automatically creates:
 
 1. **Route Table**: Routes all traffic (0.0.0.0/0) from the container subnet through the Azure Firewall
 2. **Network Rules**: Allows outbound traffic from containers (10.0.2.0/24) to any destination
-3. **NAT Rules**: Creates DNAT rules to forward traffic from the specified public IP addresses to the container's private IP
+3. **NAT Rules**: Creates DNAT rules to forward traffic from the firewall's public IP to the container's private IP (10.0.2.4)
 
-**Important**: `--expose-ip` can be specified multiple times to create NAT rules for multiple public IP addresses. Each IP/port combination creates a separate NAT rule.
+### Understanding --expose-ip
 
-**Limitations**:
-- Only IPv4 addresses are supported (IPv6 is not supported)
-- NAT rules allow traffic from any source IP address (`*`) for maximum accessibility
-- For production environments, consider manually configuring source IP restrictions after rules are created
+**IMPORTANT**: `--expose-ip` specifies **source IP addresses** that are allowed to access the container through the firewall, NOT destination IPs.
+
+**NAT Rule Flow:**
+```
+Source IPs (--expose-ip) → Firewall Public IP:port → Container (10.0.2.4):port
+```
+
+- **Source addresses**: The IPs specified with `--expose-ip` (or "*" if not specified)
+- **Destination address**: Always the firewall's public IP
+- **Translated address**: Always 10.0.2.4 (the container)
+- **Ports**: Specified in `--expose-port`
+
+### DMZ Mode
+
+Use `--dmz` to allow **all traffic on all ports** from any source to reach the container. This creates a single NAT rule that forwards everything to the container.
 
 ## Requirements
 
 - **Configured Firewall**: You must have an Azure Firewall configured using `acido firewall create`
-- **--expose-port**: You must specify at least one port to expose
 - **--bidirectional**: You must use the bidirectional flag to enable this mode
-- **--expose-ip**: Specify one or more public IP addresses
+- **--expose-port**: Required for standard mode (not required for DMZ mode)
+- **--expose-ip**: Optional - specify one or more source IP addresses allowed to access container
+- **--dmz**: Optional - allow all traffic on all ports (mutually exclusive with --expose-ip)
 
 ## Usage
 
-### Basic Example (Single IP)
+### Basic Example (Allow Any Source IP)
 
 ```bash
 # Create a firewall first (one-time setup)
 acido firewall create my-firewall --vnet my-vnet --public-ip my-firewall-ip
 
-# Run a container with automatic firewall rules for a single public IP
-acido run voip-server \
-  --image asterisk \
+# Run container accessible from any source IP on specific ports
+acido run web-server \
+  --image nginx \
   --bidirectional \
-  --expose-ip 20.50.100.1 \
-  --expose-port 5060:udp \
-  --expose-port 5060:tcp \
+  --expose-port 80:tcp \
+  --expose-port 443:tcp \
   --duration 3600
 ```
 
-### Multiple IP Addresses
+Access the container at: `http://<firewall-public-ip>:80`
 
-You can expose the same container on multiple public IPs by specifying `--expose-ip` multiple times:
+### Source IP Filtering
+
+Restrict access to specific source IPs:
 
 ```bash
-# Expose container on two different public IPs
-acido run multi-ip-service \
-  --image nginx \
+# Only allow access from specific source IPs
+acido run secure-app \
+  --image myapp \
   --bidirectional \
-  --expose-ip 20.50.100.1 \
-  --expose-ip 20.50.100.2 \
-  --expose-port 80:tcp \
-  --expose-port 443:tcp \
+  --expose-ip 192.168.1.100 \
+  --expose-ip 192.168.1.101 \
+  --expose-port 8080:tcp \
   --duration 7200
 ```
 
-This creates NAT rules for:
-- `20.50.100.1:80` → container:80 (TCP)
-- `20.50.100.1:443` → container:443 (TCP)
-- `20.50.100.2:80` → container:80 (TCP)
-- `20.50.100.2:443` → container:443 (TCP)
+This creates NAT rules that only allow traffic from 192.168.1.100 and 192.168.1.101 to reach the container through the firewall.
+
+### DMZ Mode (All Traffic, All Ports)
+
+```bash
+# DMZ mode: Allow all traffic on all ports to container
+acido run dmz-server \
+  --image myserver \
+  --bidirectional \
+  --dmz \
+  --duration 86400
+```
+
+This creates a single NAT rule: `Firewall-Public-IP:* → Container:*` (any source, any port, any protocol)
+
+### VoIP Server Example
+
+```bash
+acido run voip-server \
+  --image asterisk \
+  --bidirectional \
+  --expose-port 5060:udp \
+  --expose-port 5060:tcp \
+  --expose-port 10000-10099:udp \
+  --duration 86400
+```
 
 ### What Happens Behind the Scenes
 
@@ -75,73 +108,38 @@ This creates NAT rules for:
 
 2. **Network Rule Creation**:
    - Collection: `acido-container-outbound`
-   - Rule Name: `<container-name>-outbound-rule`
+   - Rule Name: `<container-name>-outbound-<timestamp>` (timestamp prevents collisions)
    - Source: `10.0.2.0/24` (container subnet)
    - Destination: `*` (any)
-   - Ports: All ports specified in --expose-port
-   - Protocols: All protocols specified in --expose-port
+   - Ports: All ports specified in --expose-port (or "*" for DMZ)
+   - Protocols: All protocols specified in --expose-port (or "Any" for DMZ)
 
-3. **NAT Rule Creation** (one per IP/port combination):
+3. **NAT Rule Creation**:
    - Collection: `acido-auto-nat`
-   - Rule Name: `<container-name>-nat-<ip-address>-<port>-<protocol>` (IP dots replaced with dashes)
-   - Source: `*` (any source IP)
-   - Destination: Specified public IP address from --expose-ip
-   - Destination Port: The exposed port
-   - Translated Address: `10.0.2.4` (first container in subnet)
-   - Translated Port: Same as destination port
-   - Protocol: TCP, UDP, or both
+   - **Rule Name** (standard): `<container>-nat-<source-ip>-<port>-<protocol>`
+   - **Rule Name** (DMZ): `<container>-dmz-all`
+   - **Source**: IPs from --expose-ip (or "*" if not specified)
+   - **Destination**: **Firewall's public IP** (e.g., 98.71.167.84)
+   - **Translated Address**: 10.0.2.4 (container)
+   - **Ports**: From --expose-port (or "*" for DMZ)
 
-**Note**: With multiple IPs and multiple ports, the number of NAT rules created = (number of IPs) × (number of ports)
+**Note**: The number of NAT rules created = (number of source IPs) × (number of ports)
 
-## Multiple Ports Example
-
-```bash
-acido run web-server \
-  --image nginx \
-  --bidirectional \
-  --expose-ip 20.50.100.1 \
-  --expose-port 80:tcp \
-  --expose-port 443:tcp \
-  --expose-port 8080:tcp \
-  --duration 7200
-```
-
-This creates:
-- 1 route table
-- 1 network rule (with ports 80, 443, 8080)
-- 3 NAT rules (one for each port on the single IP)
-
-## Port Ranges
-
-You can also specify port ranges and multiple IPs:
-
-```bash
-acido run game-server \
-  --image game-image \
-  --bidirectional \
-  --expose-ip 20.50.100.1 \
-  --expose-ip 20.50.100.2 \
-  --expose-port 25565:tcp \
-  --expose-port 10000-10099:udp \
-  --duration 86400
-```
-
-This creates:
-- 1 route table
-- 1 network rule (with ports 25565 and 10000-10099)
-- 202 NAT rules (2 IPs × 101 ports: 1 TCP + 100 UDP per IP)
+For DMZ mode, only 1 NAT rule is created regardless of ports.
 
 ## Accessing Your Container
 
-After the container is created, you can access it using the specified public IPs:
+After the container is created, access it using the **firewall's public IP**:
 
 ```bash
-# For VoIP example with IP 20.50.100.1:
-sip:user@20.50.100.1:5060
+# For web server:
+http://<firewall-public-ip>:80
 
-# For web server example:
-http://20.50.100.1:80
-http://20.50.100.2:80
+# For VoIP:
+sip:user@<firewall-public-ip>:5060
+
+# Get your firewall's public IP:
+acido firewall ls
 ```
 
 ## Error Scenarios
@@ -149,26 +147,36 @@ http://20.50.100.2:80
 ### No Firewall Configured
 
 ```bash
-acido run test --expose-ip 20.50.100.1 --expose-port 80:tcp
+acido run test --expose-ip 192.168.1.100 --expose-port 80:tcp
 ```
 
 **Error**: `--expose-ip requires a configured firewall`
 
 **Solution**: Create a firewall first using `acido firewall create`
 
-### Missing --expose-port
+### Missing --expose-port (Non-DMZ Mode)
 
 ```bash
-acido run test --bidirectional --expose-ip 20.50.100.1
+acido run test --bidirectional --expose-ip 192.168.1.100
 ```
 
 **Error**: `--expose-ip requires --expose-port to be specified`
 
-**Solution**: Add `--expose-port` flag with at least one port
+**Solution**: Add `--expose-port` flag with at least one port (or use --dmz for all ports)
+
+### DMZ and expose-ip Together
+
+```bash
+acido run test --bidirectional --dmz --expose-ip 192.168.1.100
+```
+
+**Error**: `--dmz and --expose-ip cannot be used together`
+
+**Solution**: Use either --dmz (allow all sources) OR --expose-ip (restrict sources), not both
 
 ### Missing --bidirectional
 
-If you use `--expose-ip` without `--bidirectional`, the automatic rule creation will not happen. You must use both flags together.
+If you use `--expose-ip` or `--dmz` without `--bidirectional`, the automatic rule creation will not happen. You must use `--bidirectional` with these flags.
 
 ## Cost Considerations
 
