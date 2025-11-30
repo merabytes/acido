@@ -88,7 +88,7 @@ def _execute_fleet(acido, fleet_name, num_instances, image_name, task, input_fil
 
 
 def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None, 
-                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16, entrypoint=None, expose_ips=None):
+                 bidirectional=False, exposed_ports=None, max_cpu=4, max_ram=16, entrypoint=None, expose_ips=None, dmz=False):
     """Execute run operation (single ephemeral instance) and return response and outputs."""
     full_image_url = acido.build_image_url(image_name)
     
@@ -107,7 +107,8 @@ def _execute_run(acido, name, image_name, task, duration, cleanup, regions=None,
         max_cpu=max_cpu,
         max_ram=max_ram,
         entrypoint=entrypoint,
-        expose_ips=expose_ips
+        expose_ips=expose_ips,
+        dmz=dmz
     )
 
 
@@ -332,7 +333,8 @@ def lambda_handler(event, context):
             # New parameters for port forwarding
             bidirectional = event.get('bidirectional', False)
             exposed_ports = event.get('exposed_ports', None)  # List of {"port": 5060, "protocol": "UDP"}
-            expose_ips = event.get('expose_ips', None)  # List of IP addresses
+            expose_ips = event.get('expose_ips', None)  # List of source IP addresses
+            dmz = event.get('dmz', False)  # DMZ mode
             max_cpu = event.get('max_cpu', event.get('cpu', 4))
             max_ram = event.get('max_ram', event.get('ram', 16))
             
@@ -344,10 +346,14 @@ def lambda_handler(event, context):
             if expose_ips and not exposed_ports:
                 return build_error_response('--expose-ip requires --expose-port to be specified')
             
+            # Validate: dmz and expose_ips cannot be used together
+            if dmz and expose_ips:
+                return build_error_response('dmz and expose_ips cannot be used together')
+            
             # Execute run operation
             response, outputs = _execute_run(
                 acido, name, image_name, task, duration, cleanup, regions,
-                bidirectional, exposed_ports, max_cpu, max_ram, entrypoint, expose_ips
+                bidirectional, exposed_ports, max_cpu, max_ram, entrypoint, expose_ips, dmz
             )
             
             # Return successful response
@@ -361,6 +367,7 @@ def lambda_handler(event, context):
                 'bidirectional': bidirectional,
                 'exposed_ports': exposed_ports if exposed_ports else [],
                 'expose_ips': expose_ips if expose_ips else [],
+                'dmz': dmz,
                 'outputs': outputs
             })
         
