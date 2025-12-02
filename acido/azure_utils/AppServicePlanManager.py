@@ -25,7 +25,7 @@ ASP_SKU_TIERS = [
     # Premium tier (v2)
     ('PremiumV2', 'P1v2', 'Premium v2 - P1v2 (1 core, 3.5 GB RAM)'),
     ('PremiumV2', 'P2v2', 'Premium v2 - P2v2 (2 cores, 7 GB RAM)'),
-    ('PremiumV2', 'P3v2', 'Premium v2 - P3v3 (4 cores, 14 GB RAM)'),
+    ('PremiumV2', 'P3v2', 'Premium v2 - P3v2 (4 cores, 14 GB RAM)'),
     
     # Premium tier (v3)
     ('PremiumV3', 'P1v3', 'Premium v3 - P1v3 (2 cores, 8 GB RAM)'),
@@ -35,7 +35,7 @@ ASP_SKU_TIERS = [
     # Isolated tier (v2)
     ('IsolatedV2', 'I1v2', 'Isolated v2 - I1v2 (2 cores, 8 GB RAM)'),
     ('IsolatedV2', 'I2v2', 'Isolated v2 - I2v2 (4 cores, 16 GB RAM)'),
-    ('IsolatedV2', 'I3v2', 'Isolated v2 - I3v3 (8 cores, 32 GB RAM)'),
+    ('IsolatedV2', 'I3v2', 'Isolated v2 - I3v2 (8 cores, 32 GB RAM)'),
 ]
 
 
