@@ -54,7 +54,7 @@ class AppServicePlanManager(ManagedIdentity):
         self.location = 'westeurope'
         
         if login:
-            credential = self.get_credential()
+            credential = self.get_credential(scope_keys=("instance",))
             subscription = self.extract_subscription(credential)
             self._client = WebSiteManagementClient(credential, subscription)
             self.subscription_id = subscription

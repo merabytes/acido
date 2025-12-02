@@ -473,7 +473,6 @@ if args.subcommand == 'asp':
             args.asp_list = True
         elif args.asp_subcommand == 'scale':
             args.asp_scale = True
-            args.asp_name = args.name
 
 instances_outputs = {}
 
@@ -1187,6 +1186,20 @@ class Acido(object):
 
     # ==================== ASP (App Service Plan) Methods ====================
     
+    def _format_sku_info(self, plan):
+        """
+        Helper to format SKU tier and name from an App Service Plan.
+        
+        Args:
+            plan: App Service Plan object
+        
+        Returns:
+            tuple: (tier, sku_name) or ('Unknown', 'Unknown') if not available
+        """
+        tier = plan.sku.tier if plan.sku else 'Unknown'
+        sku = plan.sku.name if plan.sku else 'Unknown'
+        return tier, sku
+    
     def asp_config(self):
         """
         Configure default ASP scaling tiers (scale up and scale down).
@@ -1240,8 +1253,7 @@ class Acido(object):
             
             print(good("App Service Plans:"))
             for plan in plans:
-                tier = plan.sku.tier if plan.sku else 'Unknown'
-                sku = plan.sku.name if plan.sku else 'Unknown'
+                tier, sku = self._format_sku_info(plan)
                 print(f"  {bold(plan.name)}")
                 print(f"    SKU: {green(f'{tier}/{sku}')}")
                 print(f"    Location: {plan.location}")
@@ -1303,8 +1315,7 @@ class Acido(object):
         # Scale each matching ASP
         success_count = 0
         for plan in plans:
-            current_tier = plan.sku.tier if plan.sku else 'Unknown'
-            current_sku = plan.sku.name if plan.sku else 'Unknown'
+            current_tier, current_sku = self._format_sku_info(plan)
             
             print(info(f"Processing: {bold(plan.name)} (current: {current_tier}/{current_sku})"))
             
@@ -3140,7 +3151,7 @@ def main():
     if hasattr(args, 'asp_scale') and args.asp_scale:
         scale_up = getattr(args, 'scale_up', False)
         scale_down = getattr(args, 'scale_down', False)
-        acido.asp_scale(args.asp_name, scale_up=scale_up, scale_down=scale_down)
+        acido.asp_scale(args.name, scale_up=scale_up, scale_down=scale_down)
 
 if __name__ == "__main__":
     main()
