@@ -30,6 +30,7 @@ Whether you’re building a secure secret-sharing system, a distributor of short
 - [CLI Reference](#cli-reference)
 - [Examples](#examples)
   - [IP Address Routing](#ip-address-routing)
+  - [App Service Plan (ASP) Scaling](#app-service-plan-asp-scaling)
   - [Port Forwarding (Bidirectional Connectivity)](#port-forwarding-bidirectional-connectivity)
 - [Docker Usage](#docker-usage)
 - [AWS Lambda Support](#aws-lambda-support)
@@ -188,6 +189,14 @@ acido ip create <name>      # Create IPv4 address
 acido ip ls                 # List all IPs
 acido ip rm <name>          # Remove IP
 acido ip select             # Select IP interactively
+
+# Manage App Service Plans (ASP)
+acido asp config            # Configure default scale up/down tiers
+acido asp ls                # List all App Service Plans
+acido asp scale * --scaleup         # Scale all ASPs up
+acido asp scale * --scaledown       # Scale all ASPs down
+acido asp scale <name> --scaleup    # Scale specific ASP up
+acido asp scale prod-* --scaledown  # Scale ASPs matching pattern down
 ```
 
 ## Examples
@@ -239,6 +248,57 @@ acido ip clean
 # Cleanup
 acido ip rm my-ip
 ```
+
+### App Service Plan (ASP) Scaling
+
+Acido provides easy bulk scaling of Azure App Service Plans. Configure default scale-up and scale-down tiers once, then scale multiple ASPs with a single command.
+
+**Key Features:**
+- Configure default scale-up/down tiers
+- Scale all ASPs or specific patterns
+- Support for pattern matching (e.g., `prod-*`)
+- Bulk operations for multiple ASPs
+
+**Examples:**
+
+```bash
+# 1. Configure default tiers (one-time setup)
+acido asp config
+# Select scale-up tier (e.g., PremiumV2/P1v2)
+# Select scale-down tier (e.g., Basic/B1)
+
+# 2. List all App Service Plans
+acido asp ls
+
+# 3. Scale all ASPs up to configured tier
+acido asp scale * --scaleup
+
+# 4. Scale all ASPs down to configured tier
+acido asp scale * --scaledown
+
+# 5. Scale specific ASP
+acido asp scale my-asp --scaleup
+
+# 6. Scale ASPs matching pattern
+acido asp scale prod-* --scaledown
+acido asp scale dev-* --scaleup
+
+# 7. Scale staging environment
+acido asp scale staging-* --scaledown
+```
+
+**Available SKU Tiers:**
+- Free (F1)
+- Shared (D1)
+- Basic (B1, B2, B3)
+- Standard (S1, S2, S3)
+- Premium v2 (P1v2, P2v2, P3v2)
+- Premium v3 (P1v3, P2v3, P3v3)
+- Isolated v2 (I1v2, I2v2, I3v2)
+
+**Configuration:**
+The scale-up and scale-down tiers are stored in `~/.acido/config.json` and persist across sessions. Configure once and use for all scaling operations.
+
 
 ### Port Forwarding (Bidirectional Connectivity)
 

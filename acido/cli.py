@@ -255,6 +255,22 @@ firewall_ls_parser = firewall_subparsers.add_parser('ls', help='List all Azure F
 firewall_rm_parser = firewall_subparsers.add_parser('rm', help='Remove Azure Firewall')
 firewall_rm_parser.add_argument('name', help='Name of the Azure Firewall to remove')
 
+# ASP (App Service Plan) subcommand for scaling management
+asp_parser = subparsers.add_parser('asp', help='Manage Azure App Service Plans (scale up/down)')
+asp_subparsers = asp_parser.add_subparsers(dest='asp_subcommand', help='ASP management commands')
+
+# ASP config subcommand
+asp_config_parser = asp_subparsers.add_parser('config', help='Configure default scale up/down tiers')
+
+# ASP list subcommand
+asp_list_parser = asp_subparsers.add_parser('ls', help='List all App Service Plans')
+
+# ASP scale subcommand (supports both specific names and patterns like *)
+asp_scale_parser = asp_subparsers.add_parser('scale', help='Scale App Service Plan(s) up or down')
+asp_scale_parser.add_argument('name', help='App Service Plan name or pattern (e.g., "prod-*" or "*" for all)')
+asp_scale_parser.add_argument('--scaleup', dest='scale_up', action='store_true', help='Scale up to configured tier')
+asp_scale_parser.add_argument('--scaledown', dest='scale_down', action='store_true', help='Scale down to configured tier')
+
 # Select subcommand
 select_parser = subparsers.add_parser('select', help='Select instances by name/regex')
 select_parser.add_argument('pattern', help='Name or regex pattern to select')
@@ -454,6 +470,16 @@ if args.subcommand == 'firewall':
         elif args.firewall_subcommand == 'delete-rule':
             args.delete_firewall_rule = True
 
+# Handle ASP subcommand (App Service Plan scaling)
+if args.subcommand == 'asp':
+    if hasattr(args, 'asp_subcommand') and args.asp_subcommand:
+        if args.asp_subcommand == 'config':
+            args.asp_config = True
+        elif args.asp_subcommand == 'ls':
+            args.asp_list = True
+        elif args.asp_subcommand == 'scale':
+            args.asp_scale = True
+
 instances_outputs = {}
 
 def build_output(result):
@@ -497,6 +523,12 @@ class Acido(object):
         self.vnet_name = None
         self.subnet_name = None
         self.subnet_id = None
+        
+        # ASP (App Service Plan) scaling configuration
+        self.asp_scale_up_tier = None
+        self.asp_scale_up_sku = None
+        self.asp_scale_down_tier = None
+        self.asp_scale_down_sku = None
 
         if rg:
             self.rg = rg
@@ -584,6 +616,10 @@ class Acido(object):
         # Initialize FirewallManager for Azure Firewall (Solution 4)
         from acido.azure_utils.FirewallManager import FirewallManager
         self.firewall_manager = FirewallManager(resource_group=self.rg)
+        
+        # Initialize AppServicePlanManager for ASP scaling
+        from acido.azure_utils.AppServicePlanManager import AppServicePlanManager
+        self.asp_manager = AppServicePlanManager(resource_group=self.rg)
 
         if args.create_ip:
             public_ip_name = args.create_ip
@@ -623,6 +659,11 @@ class Acido(object):
             'vnet_name': self.vnet_name,
             'subnet_name': self.subnet_name,
             'subnet_id': self.subnet_id,
+            # ASP (App Service Plan) scaling configuration
+            'asp_scale_up_tier': self.asp_scale_up_tier,
+            'asp_scale_up_sku': self.asp_scale_up_sku,
+            'asp_scale_down_tier': self.asp_scale_down_tier,
+            'asp_scale_down_sku': self.asp_scale_down_sku,
         }
 
         try:
@@ -1148,6 +1189,159 @@ class Acido(object):
             return False
 
     # ==================== End of Firewall Methods ====================
+
+    # ==================== ASP (App Service Plan) Methods ====================
+    
+    def _format_sku_info(self, plan):
+        """
+        Helper to format SKU tier and name from an App Service Plan.
+        
+        Args:
+            plan: App Service Plan object
+        
+        Returns:
+            tuple: (tier, sku_name) or ('Unknown', 'Unknown') if not available
+        """
+        tier = plan.sku.tier if plan.sku else 'Unknown'
+        sku = plan.sku.name if plan.sku else 'Unknown'
+        return tier, sku
+    
+    def asp_config(self):
+        """
+        Configure default ASP scaling tiers (scale up and scale down).
+        Saves the configuration to ~/.acido/config.json
+        """
+        from beaupy import select as beaupy_select
+        from acido.azure_utils.AppServicePlanManager import ASP_SKU_TIERS
+        
+        print(info("Configure ASP Scaling Tiers"))
+        print(info("Select default tiers for scaling up and scaling down App Service Plans\n"))
+        
+        # Display available tiers
+        tier_options = [f"{display}" for tier, sku, display in ASP_SKU_TIERS]
+        
+        # Select scale up tier
+        print(bold("Select default SCALE UP tier:"))
+        scale_up_index = beaupy_select(tier_options, cursor="🢧", cursor_style="cyan")
+        scale_up_tier, scale_up_sku, scale_up_display = ASP_SKU_TIERS[scale_up_index]
+        
+        # Select scale down tier
+        print(bold("\nSelect default SCALE DOWN tier:"))
+        scale_down_index = beaupy_select(tier_options, cursor="🢧", cursor_style="cyan")
+        scale_down_tier, scale_down_sku, scale_down_display = ASP_SKU_TIERS[scale_down_index]
+        
+        # Save configuration
+        self.asp_scale_up_tier = scale_up_tier
+        self.asp_scale_up_sku = scale_up_sku
+        self.asp_scale_down_tier = scale_down_tier
+        self.asp_scale_down_sku = scale_down_sku
+        
+        self._save_config()
+        
+        print(good(f"\nASP Scaling configuration saved:"))
+        print(info(f"  Scale UP:   {scale_up_tier}/{scale_up_sku}"))
+        print(info(f"  Scale DOWN: {scale_down_tier}/{scale_down_sku}"))
+    
+    def asp_list(self):
+        """
+        List all App Service Plans in the resource group.
+        """
+        if self.asp_manager is None:
+            print(bad("ASP manager is not initialized. Please provide a resource group."))
+            return []
+        
+        try:
+            plans = self.asp_manager.list_app_service_plans()
+            
+            if not plans:
+                print(info("No App Service Plans found."))
+                return []
+            
+            print(good("App Service Plans:"))
+            for plan in plans:
+                tier, sku = self._format_sku_info(plan)
+                print(f"  {bold(plan.name)}")
+                print(f"    SKU: {green(f'{tier}/{sku}')}")
+                print(f"    Location: {plan.location}")
+                print(f"    Status: {plan.status}")
+            
+            return plans
+        except Exception as e:
+            print(bad(f"Failed to list App Service Plans: {str(e)}"))
+            return []
+    
+    def asp_scale(self, name_pattern, scale_up=False, scale_down=False):
+        """
+        Scale App Service Plan(s) up or down based on configured tiers.
+        
+        Args:
+            name_pattern (str): ASP name or pattern (e.g., "prod-*" or "*" for all)
+            scale_up (bool): Whether to scale up
+            scale_down (bool): Whether to scale down
+        """
+        if self.asp_manager is None:
+            print(bad("ASP manager is not initialized. Please provide a resource group."))
+            return False
+        
+        # Validate that either scale_up or scale_down is specified
+        if not scale_up and not scale_down:
+            print(bad("Please specify either --scaleup or --scaledown"))
+            return False
+        
+        if scale_up and scale_down:
+            print(bad("Cannot specify both --scaleup and --scaledown"))
+            return False
+        
+        # Check if configuration exists
+        if scale_up:
+            if not self.asp_scale_up_tier or not self.asp_scale_up_sku:
+                print(bad("Scale up tier not configured. Please run 'acido asp config' first."))
+                return False
+            target_tier = self.asp_scale_up_tier
+            target_sku = self.asp_scale_up_sku
+            action = "scale up"
+        else:
+            if not self.asp_scale_down_tier or not self.asp_scale_down_sku:
+                print(bad("Scale down tier not configured. Please run 'acido asp config' first."))
+                return False
+            target_tier = self.asp_scale_down_tier
+            target_sku = self.asp_scale_down_sku
+            action = "scale down"
+        
+        # Get matching ASPs
+        plans = self.asp_manager.list_app_service_plans(pattern=name_pattern)
+        
+        if not plans:
+            print(orange(f"No App Service Plans match pattern '{name_pattern}'"))
+            return False
+        
+        print(info(f"Found {len(plans)} App Service Plan(s) matching '{name_pattern}'"))
+        print(info(f"Target: {action} to {target_tier}/{target_sku}\n"))
+        
+        # Scale each matching ASP
+        success_count = 0
+        for plan in plans:
+            current_tier, current_sku = self._format_sku_info(plan)
+            
+            print(info(f"Processing: {bold(plan.name)} (current: {current_tier}/{current_sku})"))
+            
+            if scale_up:
+                result = self.asp_manager.scale_up(plan.name, target_tier, target_sku)
+            else:
+                result = self.asp_manager.scale_down(plan.name, target_tier, target_sku)
+            
+            if result:
+                success_count += 1
+        
+        print()
+        if success_count == len(plans):
+            print(good(f"Successfully scaled {success_count}/{len(plans)} App Service Plan(s)"))
+            return True
+        else:
+            print(orange(f"Scaled {success_count}/{len(plans)} App Service Plan(s) (some failed)"))
+            return False
+    
+    # ==================== End of ASP Methods ====================
 
     def ls(self, interactive=True):
         all_instances = {}
@@ -3112,6 +3306,16 @@ def main():
         custom_cmd = getattr(args, 'custom_cmd', None)
         no_cache = getattr(args, 'no_cache', False)
         acido.create_acido_image(args.create_image, quiet=args.quiet, install_packages=install_pkgs, no_update=no_update, run_as_root=run_as_root, custom_entrypoint=custom_entrypoint, custom_cmd=custom_cmd, no_cache=no_cache)
+    
+    # Handle ASP (App Service Plan) commands
+    if hasattr(args, 'asp_config') and args.asp_config:
+        acido.asp_config()
+    if hasattr(args, 'asp_list') and args.asp_list:
+        acido.asp_list()
+    if hasattr(args, 'asp_scale') and args.asp_scale:
+        scale_up = getattr(args, 'scale_up', False)
+        scale_down = getattr(args, 'scale_down', False)
+        acido.asp_scale(args.name, scale_up=scale_up, scale_down=scale_down)
 
 if __name__ == "__main__":
     main()
